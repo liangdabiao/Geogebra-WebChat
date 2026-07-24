@@ -79,7 +79,7 @@ bun run proxy
 bun run dev
 ```
 
-打开 http://localhost:5173 ，在右上角填入 OpenAI API Key 和模型名（默认 `deepseek-v4-pro`），输入题目即可。
+打开 http://localhost:5173 ，在右上角填入 OpenAI API（兼容格式） Key 和模型名（默认 `deepseek-v4-pro`），输入题目即可。
 
 > 也可在启动代理前设置 `MODEL_API_KEY` 环境变量，由服务端注入 Key，前端就不用填、也不暴露：
 > `MODEL_API_KEY=sk-... bun run proxy`
