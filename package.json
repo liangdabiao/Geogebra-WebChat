@@ -15,11 +15,13 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.68",
     "ai": "^6.0.197",
+    "katex": "^0.18.1",
     "marked": "^12.0.2",
     "solid-js": "^1.9.13"
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
+    "@types/katex": "^0.16.8",
     "typescript": "^5.9.3",
     "vite": "^6.4.2",
     "vite-plugin-solid": "^2.11.12"

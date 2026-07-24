@@ -3,6 +3,33 @@ import { marked } from "marked";
 import { mountGeoGebra, type GeoGebraController } from "./geogebra";
 import { runChat } from "./ai-client";
 import type { ModelMessage } from "ai";
+import katex from "katex";
+
+function preprocessMarkdown(text: string): string {
+  // 1. Normalize LaTeX delimiters: \(→$, \)→$, \[→$$, \]→$$
+  text = text
+    .replace(/\\\(/g, "$")
+    .replace(/\\\)/g, "$")
+    .replace(/\\\[/g, "$$")
+    .replace(/\\\]/g, "$$");
+  // 2. Catch standalone [...] (not markdown links) with LaTeX content → $...$
+  return text.replace(/\[([^\[\]]+)\](?!\s*\()/g, (match, content) => {
+    if (/\\/.test(content)) return `$${content}$`;
+    return match;
+  });
+}
+
+function renderMath(text: string): string {
+  // 在 marked.parse() 之前处理：把 raw markdown 中的 $...$ 和 $$...$$
+  // 渲染为 KaTeX HTML，这样 marked 不会碰到 < > & 等字符
+  text = text.replace(/\$\$(.+?)\$\$/gs, (_, code) =>
+    katex.renderToString(code, { displayMode: true, throwOnError: false })
+  );
+  text = text.replace(/(?<!\$)\$(.+?)\$(?!\$)/g, (_, code) =>
+    katex.renderToString(code, { displayMode: false, throwOnError: false })
+  );
+  return text;
+}
 
 interface UiMessage {
   id: number;
@@ -186,7 +213,7 @@ export default function App() {
                       </div>
                     </Show>
                     <Show when={m.content}>
-                      <div class="markdown" innerHTML={marked.parse(m.content) as string} />
+                      <div class="markdown" innerHTML={marked.parse(renderMath(preprocessMarkdown(m.content))) as string} />
                     </Show>
                   </div>
                 )}
