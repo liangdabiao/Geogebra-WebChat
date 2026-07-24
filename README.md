@@ -283,3 +283,8 @@ f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
 ## 换供应商
 
 `src/ai-client.ts` 现用 `@ai-sdk/openai`。换 Anthropic / Google / DeepSeek / 通义 / OpenRouter 时，改用对应 provider 包的工厂函数即可，代理对它们一视同仁（主机已在白名单）。
+
+
+## 感谢支持
+
+https://linux.do 佬友支持
