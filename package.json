@@ -1,0 +1,27 @@
+{
+  "name": "geochat-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "GeoChat 极简 Web 版：聊天 + AI + GeoGebra 画图。",
+  "scripts": {
+    "dev": "vite",
+    "proxy": "bun server/proxy.ts",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "start": "bun server/proxy.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "^3.0.68",
+    "ai": "^6.0.197",
+    "marked": "^12.0.2",
+    "solid-js": "^1.9.13"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.2",
+    "vite-plugin-solid": "^2.11.12"
+  }
+}

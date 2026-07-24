@@ -1,0 +1,246 @@
+:root {
+  --bg: #f7f8fa;
+  --panel: #ffffff;
+  --border: #e4e7ec;
+  --text: #1f2329;
+  --muted: #8a9099;
+  --accent: #2563eb;
+  --accent-soft: #eef2ff;
+  --user-bg: #eef2ff;
+  --radius: 10px;
+  font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* 顶栏 */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.settings {
+  display: flex;
+  gap: 8px;
+}
+
+.input-key,
+.input-model {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: var(--bg);
+}
+
+.input-key {
+  width: 240px;
+}
+
+.input-model {
+  width: 140px;
+}
+
+.input-base-url {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  background: var(--bg);
+  width: 280px;
+}
+
+/* 主区 */
+.main {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 0;
+  min-height: 0;
+}
+
+.canvas-pane {
+  position: relative;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+}
+
+.canvas-status {
+  position: absolute;
+  top: 8px;
+  left: 12px;
+  z-index: 5;
+  font-size: 12px;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.8);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.ggb-container {
+  flex: 1;
+  min-height: 0;
+}
+
+/* 聊天区 */
+.chat-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+  margin-top: 40px;
+  line-height: 1.8;
+}
+
+.msg {
+  max-width: 92%;
+}
+
+.msg.user {
+  align-self: flex-end;
+}
+
+.msg-role {
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.msg.user .msg-role {
+  text-align: right;
+}
+
+.msg.user .markdown {
+  background: var(--user-bg);
+  border: 1px solid #dbe4ff;
+}
+
+.msg.assistant .markdown {
+  background: var(--panel);
+  border: 1px solid var(--border);
+}
+
+.markdown {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  font-size: 14px;
+  line-height: 1.65;
+  word-break: break-word;
+}
+
+.markdown :where(p) {
+  margin: 6px 0;
+}
+
+.markdown :where(code) {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.markdown :where(pre) {
+  background: #1f2329;
+  color: #e6e6e6;
+  padding: 10px;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.activity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 4px 0;
+}
+
+.chip {
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+}
+
+/* 输入区 */
+.composer {
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  padding: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.composer textarea {
+  flex: 1;
+  resize: none;
+  height: 64px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 14px;
+  background: var(--bg);
+}
+
+.send {
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  padding: 0 18px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
