@@ -14,15 +14,8 @@
 const PORT = Number(process.env.PORT) || 8787;
 const SERVER_KEY = process.env.MODEL_API_KEY || "";
 
-/** 允许转发的供应商主机（含子域）。 */
-const ALLOWED_HOSTS = [
-  "api.openai.com",
-  "api.anthropic.com",
-  "generativelanguage.googleapis.com",
-  "api.deepseek.com",
-  "dashscope.aliyuncs.com",
-  "openrouter.ai",
-];
+/** 主机白名单（当前不限制）。 */
+const ALLOWED_HOSTS: string[] = [];
 
 function cors(res: Response): Response {
   res.headers.set("access-control-allow-origin", "*");
@@ -40,8 +33,8 @@ function json(obj: unknown, status = 200): Response {
   );
 }
 
-function hostAllowed(host: string): boolean {
-  return ALLOWED_HOSTS.some((h) => host === h || host.endsWith("." + h));
+function hostAllowed(_host: string): boolean {
+  return true;
 }
 
 Bun.serve({
