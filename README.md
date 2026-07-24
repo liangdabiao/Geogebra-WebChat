@@ -102,9 +102,11 @@ bun run start          # 代理同时托管 dist/ 与 /api
 一句话使用：
 》 Draw a triangular pyramid (tetrahedron) and then draw its circumscribed sphere
 》 美国总统证明勾股定理图示
+》 经济学的 李嘉图 贸易理论
 
 ![](图片1.png)
 ![](图片2.png)
+![](ScreenShot_2026-07-24_102220_872.png)
 
 ## 核心流程与原理
 
