@@ -1,4 +1,4 @@
-# GeoChat Web（极简版）
+# Geogebra-WebChat（极简版）
 
 只保留核心链路：**聊天 + AI + GeoGebra 画图**。简单普通 Web 应用，但是功能齐全。
 
