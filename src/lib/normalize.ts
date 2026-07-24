@@ -59,8 +59,6 @@ function applyAlias(c: string): string {
  * - 去空白、去空行
  * - 中文别名 → 英文命令
  * - SetOpacity → SetFilling
- * - Point((x,y)) → (x,y)（Point((x,y)) 在 GeoGebra 5 中是非法语法）
- * - SetLabelMode 第二个参数纠正：true→1、false→0
  */
 export function normalizeGeoGebraCommands(commands: string[]): string[] {
   const out: string[] = [];
@@ -69,12 +67,6 @@ export function normalizeGeoGebraCommands(commands: string[]): string[] {
     if (!c) continue;
     c = applyAlias(c);
     c = c.replace(/^SetOpacity\b/, "SetFilling");
-    // Point((0,0)) → (0,0)，只处理数值坐标不处理对象引用如 Point(f)
-    c = c.replace(/^Point\(\((-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\)\)$/, "($1, $2)");
-    c = c.replace(/^Point\(\((-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)\)\)$/, "($1, $2, $3)");
-    // SetLabelMode(obj, true/false) → SetLabelMode(obj, 1/0)，GeoGebra 要求数字参数
-    c = c.replace(/^SetLabelMode\(([^,]+),\s*true\)$/, "SetLabelMode($1, 1)");
-    c = c.replace(/^SetLabelMode\(([^,]+),\s*false\)$/, "SetLabelMode($1, 0)");
     out.push(c);
   }
   return out;

@@ -99,6 +99,10 @@ bun run start          # 代理同时托管 dist/ 与 /api
 
 ### 实际效果：
 
+一句话使用：
+》 Draw a triangular pyramid (tetrahedron) and then draw its circumscribed sphere
+》 美国总统证明勾股定理图示
+
 ![](图片1.png)
 ![](图片2.png)
 

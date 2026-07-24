@@ -122,12 +122,9 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
         enableRightClick: true,
         enableShiftDragZoom: true,
         showFullscreenButton: true,
-        showErrorDialogs: false,
         perspective: "AG",
         appletOnLoad: (a: any) => {
           api = a;
-          // 确保错误弹窗被压制
-          if (typeof api.setErrorDialogs === "function") api.setErrorDialogs(false);
           clearTimeout(timeout);
           resolve();
         },
