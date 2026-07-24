@@ -1,45 +1,64 @@
-# Geogebra-WebChat（极简版）
+# Geogebra Webchat — AI 驱动的数学几何画板
 
-只保留核心链路：**聊天 + AI + GeoGebra 画图**。简单普通 Web 应用，但是功能齐全。
+> 一句话在浏览器里创建可交互的数学图形。输入自然语言描述，AI 自动生成 GeoGebra 命令并在实时画板中呈现。
 
-参考了开源项目：https://github.com/tiwe0/GeoChat
+---
 
-GeoGebra 画板是中文用户对 GeoGebra​ 的俗称，它本质上不是普通的"画图工具"，而是一款免费、开源的动态数学软件——由奥地利数学家 Markus Hohenwarter 于 2001 年创建，名字来自 Geometry（几何）+ Algebra（代数）的组合。
+## 谁适合用这个项目？
 
-### 🎯 它到底是什么
+- **学生和教师**：想要快速创建数学几何图形辅助学习和教学，无需学习复杂的 GeoGebra 命令语法
+- **数学/科研爱好者**：需要可视化函数、几何关系或数学模型
+- **前端开发者**：对 AI 集成（Vercel AI SDK）、SolidJS 实践、数学可视化感兴趣
+- **教育技术探索者**：研究如何将大语言模型与专业软件结合，降低使用门槛
 
-简单说，它是一个可以互动的数学实验室：把交互式 2D/3D 几何、代数、表格、函数绘图、统计、微积分整合进同一个软件，各模块之间动态联动——你在画板上拖动点或改参数，代数区里对应的坐标、方程会实时跟着变；反过来在指令栏输入方程，画板上也会立刻出现对应图形。
+---
 
-它被全球教育界广泛采用：用户超过 1 亿，提供超过 100 万种由社区教师制作的免费互动资源，2021 年加入 BYJU 集团后继续免费开放。
+## 项目背景与解决的需求
 
-### 🧩 核心功能
+GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球用户超过 1 亿。然而，使用 GeoGebra 需要掌握其特定的命令语法，对初学者构成门槛。
 
-几何作图：画点、线、圆、多边形、圆锥曲线等，支持拖拽、测量、变换
+与此同时，大语言模型在理解和生成自然语言方面的能力不断提升。**Geogebra Webchat 的核心思路**：让用户用自然语言描述数学问题，AI 自动转化为 GeoGebra 命令，在画板上实时构造图形，并用文字解释几何关系。
 
-代数运算：直接输入方程、函数、坐标，自动生成对应图形
+这带来了几个根本性的变化：
+- **降低门槛**：不用记命令，说人话就行
+- **提高效率**：一句「画一个正四面体并标出外接球」秒出结果
+- **拓展场景**：经济学图表、物理模型、3D 几何都可以用自然语言生成
 
-函数绘图：绘制函数图像、曲线，探索导数、积分、极限
+---
 
-3D 绘图：创建和探索三维立体图形
+## 核心功能
 
-统计与概率：处理数据、绘制统计图表、计算概率分布
+- **自然语言作图**：输入数学/几何问题，AI 自动生成并执行 GeoGebra 命令
+- **实时交互画板**：拖拽、缩放、旋转，图形与代数区联动
+- **流式 Markdown 渲染**：AI 解释步骤实时显示，公式用 KaTeX 渲染
+- **2D / 3D 支持**：平面几何和立体图形均可
+- **多模型兼容**：通过 OpenAI 兼容 API，可切换任意大模型（DeepSeek、通义千问、GPT 等）
+- **服务端 Key 注入**：可选隐藏 API Key，不暴露给浏览器
 
-微积分：函数求导、积分、计算极值
+---
 
-交互元素：滑块、动画、动态模型，用于演示和探究
+## 实际效果
 
-CAS 计算机代数系统：符号计算
+```
+输入：Draw a triangular pyramid (tetrahedron) and then draw its circumscribed sphere
+输入：美国总统证明勾股定理图示
+输入：经济学的李嘉图贸易理论
+输入：各种圆锥曲线
+```
 
-电子表格：像 Excel 一样处理数据
+![](图片1.png)
+![](图片2.png)
+![](ScreenShot_2026-07-24_102220_872.png)
+![](ScreenShot_2026-07-24_103552_276.png)
 
-
+---
 
 ## 技术栈
 
-- **前端**：SolidJS + Vite；`streamdown` 未用，改用 `marked` 渲染 Markdown。
-- **AI**：Vercel `ai` SDK v6，浏览器内 `streamText({ stopWhen: stepCountIs(6) })` 跑工具循环，工具 `execute` 直接写 GeoGebra 画板。
-- **GeoGebra**：官方 CDN `deployggb.js`，无需本地 vendor。
-- **后端**：一个 Bun 单文件 `/api/llm-proxy`，透明转发 + 解决 CORS + 主机白名单；生产模式顺便托管 `dist/`。
+- **前端**：SolidJS + Vite，`marked` 渲染 Markdown，KaTeX 渲染公式
+- **AI**：Vercel `ai` SDK v6，浏览器内 `streamText({ stopWhen: stepCountIs(6) })` 跑工具调用循环
+- **GeoGebra**：官方 CDN `deployggb.js`，无需本地 vendor 文件
+- **后端**：一个 Bun 单文件 `/api/llm-proxy`，透明转发 + 解决 CORS + 可选服务端 Key 注入
 
 ## 目录
 
@@ -55,14 +74,14 @@ geochat-web/
 │   ├── ai-client.ts         # streamText + 工具循环（核心）
 │   ├── geogebra.ts          # CDN 加载 + 画板控制
 │   ├── styles.css
-│   └── lib/normalize.ts     # 命令规范化（中文别名/简写）
+│   └── lib/normalize.ts     # 命令规范化（中文别名→英文）
 └── server/
     └── proxy.ts             # LLM 代理 + 静态托管
 ```
 
-## 运行
+## 快速开始
 
-需要 Bun（主项目已用）。安装：
+需要 [Bun](https://bun.sh) 运行时。
 
 ```sh
 cd geochat-web
@@ -72,46 +91,28 @@ bun install
 开发模式（两个终端）：
 
 ```sh
-# 终端 1：启动 LLM 代理
+# 终端 1：LLM 代理
 bun run proxy
 
-# 终端 2：启动前端
+# 终端 2：前端
 bun run dev
 ```
 
-打开 http://localhost:5173 ，在右上角填入 OpenAI API（兼容格式） Key 和模型名（默认 `deepseek-v4-pro`），输入题目即可。
+打开 http://localhost:5173 ，右上角填入 API Key 和模型名（默认 `deepseek-v4-pro`），输入题目即可。
 
-> 也可在启动代理前设置 `MODEL_API_KEY` 环境变量，由服务端注入 Key，前端就不用填、也不暴露：
-> `MODEL_API_KEY=sk-... bun run proxy`
+> 设置环境变量 `MODEL_API_KEY=sk-...` 后启动代理，服务端自动注入 Key，前端无需填写、Key 不暴露给浏览器。
 
-注意： 务必要AI能力达到 deepseek-v4-pro 才能正常绘图！
-
-
+注意：AI 能力需达到 **DeepSeek-v4-pro / GPT-5 级别**才能稳定绘图。
 
 生产模式：
 
 ```sh
-bun run build          # 产出 dist/
+bun run build          # 构建静态文件到 dist/
 bun run start          # 代理同时托管 dist/ 与 /api
 # 访问 http://localhost:8787
 ```
 
-
-### 实际效果：
-
-一句话使用：
-》 Draw a triangular pyramid (tetrahedron) and then draw its circumscribed sphere
-
-》 美国总统证明勾股定理图示
-
-》 经济学的 李嘉图 贸易理论
-
-》 新的绘图： 各种圆锥曲线
-
-![](图片1.png)
-![](图片2.png)
-![](ScreenShot_2026-07-24_102220_872.png)
-![](ScreenShot_2026-07-24_103552_276.png)
+---
 
 ## 核心流程与原理
 
@@ -142,21 +143,19 @@ bun run start          # 代理同时托管 dist/ 与 /api
                 └── 循环直到 stopWhen(stepCountIs(6)) 或模型产出解释
 ```
 
-### 步骤详解
-
-#### 1. 消息入口 — `App.tsx`
+### 1. 消息入口 — `App.tsx`
 
 用户输入文本 → `sendMessage()` 创建两个 `UiMessage`（user + assistant 占位）→ 积累 `ModelMessage[]` 历史 → 调用 `runChat()`。
 
-关键：`UiMessage` 用于 UI 渲染（含 `activity` 字段展示工具调用状态），`ModelMessage` 用于 AI SDK 的消息历史。两者分开维护。
+`UiMessage` 用于 UI 渲染（含 `activity` 字段展示工具调用状态），`ModelMessage` 用于 AI SDK 的消息历史，两者分开维护。
 
-#### 2. AI 工具循环 — `ai-client.ts`
+### 2. AI 工具循环 — `ai-client.ts`
 
 `runChat()` 调用 Vercel `ai` SDK v6 的 `streamText()`：
 
 ```typescript
 streamText({
-  model: openai.chat(opts.model),  // 使用 Chat Completions API (非 Responses API)
+  model: openai.chat(opts.model),  // Chat Completions API
   system: SYSTEM_PROMPT,            // 角色设定：几何作图助手
   messages,                         // 消息历史
   stopWhen: stepCountIs(6),         // 最多 6 步工具循环
@@ -180,7 +179,7 @@ streamText({
 2. `controller.executeCommands(norm, opts)` — 在 GeoGebra 画板依次执行
 3. 返回 `{ ok, failed, xml }` — 结果 + XML 快照回灌给模型
 
-#### 3. 命令规范化管道 — `src/lib/normalize.ts`
+### 3. 命令规范化管道 — `src/lib/normalize.ts`
 
 大模型可能输出中文别名或简写，在执行前需统一成 GeoGebra 5 兼容的英文命令：
 
@@ -190,20 +189,16 @@ streamText({
 描点((0,0))                → (0, 0)
 描点(f)                    → Point(f)
 设置颜色(A,red)            → SetColor(A,red)
-设置不透明度(obj,0.5)      → SetFilling(obj,0.5)
 中点(A,B)                  → Midpoint(A,B)
-p=(1,2)                    → p=(1,2)     (不变，GeoGebra 原生支持)
-A=(0,0)                    → A=(0,0)     (不变，大写命名点保留)
-f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
 ```
 
 处理步骤按顺序：
 1. **去空白/去空行**
-2. **中文别名替换** — 遍历 `ALIAS` 字典（如 `描点→Point`），前缀匹配
+2. **中文别名替换** — 遍历 `ALIAS` 字典（如 `描点→Point`），前缀匹配（多字优先）
 3. **SetOpacity → SetFilling** — GeoGebra 5 兼容
-4. **Point((x,y)) → (x, y)** — 修正 `Point((坐标))` 这种 GeoGebra 非法语法（只有纯数值坐标触发，对象引用如 `Point(f)` 不变）
+4. **Point((x,y)) → (x, y)** — 修正 `Point((坐标))` 这种 GeoGebra 非法语法
 
-#### 4. GeoGebra 画板集成 — `src/geogebra.ts`
+### 4. GeoGebra 画板集成 — `src/geogebra.ts`
 
 **加载流程：**
 1. 动态创建 `<script>` 加载 `https://www.geogebra.org/apps/deployggb.js`
@@ -211,9 +206,9 @@ f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
 3. `appletOnLoad` 回调中保存 API 引用，标记就绪
 
 **命令执行：**
-- 优先使用 `api.asyncEvalCommandResult()`（官方推荐），回退到 `api.evalCommand()`
+- 优先使用 `api.evalCommand()`（同步返回 boolean），回退到 `api.asyncEvalCommandResult()`
 - 命令之间插入 80ms 延迟，防止 GeoGebra 内部竞争
-- `restoreOnError` 选项：任一命令失败时，自动恢复执行前的 XML 快照（通过 `api.getXML()` / `api.setXML()`），避免画板进入脏状态
+- `restoreOnError`：任一命令失败时，自动恢复执行前的 XML 快照，避免画板进入脏状态
 
 **控制器 API：**
 - `executeCommands(commands, opts)` — 批量执行命令
@@ -221,7 +216,7 @@ f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
 - `setPerspective(mode)` — 切换视角
 - `getXML()` — 读取当前画板状态
 
-#### 5. LLM 代理 — `server/proxy.ts`
+### 5. LLM 代理 — `server/proxy.ts`
 
 ```
 浏览器 (Vite :5173)                     Bun 代理 (:8787)                  LLM API
@@ -229,7 +224,6 @@ f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
       │── POST /api/llm-proxy ──────────────→│                              │
       │  headers: {                           │                              │
       │    x-target-url: <实际 LLM API URL>,   │                              │
-      │    x-custom-hostname: <host>,          │                              │
       │    authorization: Bearer sk-...        │                              │
       │  }                                     │                              │
       │                                       │── POST <target-url> ───────→│
@@ -239,12 +233,12 @@ f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
 ```
 
 为什么需要代理层：
-- **CORS 解决**：浏览器直接调第三方 LLM API 会跨域，同源代理转发解决
-- **API Key 保护**（可选）：设置 `MODEL_API_KEY` 环境变量后，代理自动注入 Key，前端无需暴露
-- **主机白名单**：`ALLOWED_HOSTS` 数组控制允许的目标，防止 SSRF
-- **自定义主机支持**：`x-custom-hostname` 请求头让前端动态注册代理目标（用于用户自定义 base URL），同时绕过白名单检查
+- **CORS 解决**：浏览器直调第三方 LLM API 会跨域，同源代理转发解决
+- **API Key 保护**（可选）：`MODEL_API_KEY` 环境变量让服务端注入 Key，前端无需暴露
+- **主机白名单**：`ALLOWED_HOSTS` 控制允许的目标，防止滥用
+- **自定义主机**：`x-custom-hostname` 请求头让用户自定义 base URL 时也能通过白名单
 
-#### 6. 流式渲染 — `App.tsx`
+### 6. 流式渲染
 
 `result.fullStream` 是一个 AsyncIterable，包含多种事件类型：
 
@@ -255,9 +249,9 @@ f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
 | `tool-result` | 添加 activity chip「✓ 已写入画板」 |
 | `error` | 添加 activity chip「⚠ 错误信息」 |
 
-`marked` 将 Markdown 文本渲染成 HTML，直接设置 `innerHTML`。无虚拟 DOM 差异计算，因为每次是整体替换消息内容。
+---
 
-### 状态管理
+## 状态管理
 
 使用 SolidJS 信号（signal），无外部状态库：
 
@@ -272,12 +266,12 @@ f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
 | `running` | 是否正在请求 | 无 |
 | `ggbReady` | 画板是否就绪 | 无 |
 
-### 与完整版 GeoChat 的取舍
+---
 
-简化决策说明：
+## 与完整版 GeoChat (Tauri) 的取舍
 
-| 能力 | 极简版 | 完整版 (Tauri) |
-|-----|-------|---------------|
+| 能力 | 极简版 | 完整版 |
+|-----|-------|--------|
 | Agent 循环 | `stopWhen(stepCountIs(6))` + prompt 提示 | 状态机线束 + 账本 + 重试 |
 | 命令保证 | 命中退回到上一次 XML | 线束保证每步幂等 |
 | 离线 | 否（GeoGebra CDN） | 是（vendor 目录） |
@@ -285,17 +279,29 @@ f(x)=x^2                   → f(x)=x^2    (不变，函数定义保留)
 | 多供应商 | `@ai-sdk/openai` + 代理转发 | 多 provider + 远程工具桥 |
 | 本地 LLM | base URL 自定义 | sidecar 进程 |
 
-## 与原项目的取舍
+**去掉**：Tauri 外壳、Bun sidecar、SQLite/Drizzle、Agent 线束/账本/远程工具桥、题库、技能库、高级绘图宏、vendor(159MB)。
 
-- 去掉：Tauri 外壳、Bun sidecar、SQLite/Drizzle、Agent 线束/账本/远程工具桥、题库、技能库、高级绘图宏、vendor(159MB)。
-- 保留：SolidJS、GeoGebra 控制器（精简）、命令规范化、`ai` SDK 多供应商能力、流式渲染。
-- 代价：失去离线（GeoGebra 走 CDN）、失去线束状态机保证（用 `maxSteps`+prompt+命令规范化兜底，足够大多数题目）。
+**保留**：SolidJS、GeoGebra 控制器（精简）、命令规范化、`ai` SDK 多供应商能力、流式渲染。
+
+---
 
 ## 换供应商
 
-`src/ai-client.ts` 现用 `@ai-sdk/openai`。换 Anthropic / Google / DeepSeek / 通义 / OpenRouter 时，改用对应 provider 包的工厂函数即可，代理对它们一视同仁（主机已在白名单）。
+`src/ai-client.ts` 现用 `@ai-sdk/openai`。换 Anthropic / DeepSeek / 通义千问 / OpenRouter 时，改用对应 provider 包的工厂函数即可，代理对其一视同仁。
 
+---
 
-## 感谢支持
+## 未来可能的扩展方向
 
-https://linux.do 佬友支持
+- 更多 AI 模型支持（Claude、Gemini 等）
+- 图片上传 + 视觉理解（拍照解题）
+- 更丰富的交互体验
+- 与数学题库系统集成
+
+---
+
+## 参考
+
+- 灵感来源：[tiwe0/GeoChat](https://github.com/tiwe0/GeoChat)
+- [GeoGebra 官网](https://www.geogebra.org/)
+- 感谢 [linux.do](https://linux.do) 佬友支持
