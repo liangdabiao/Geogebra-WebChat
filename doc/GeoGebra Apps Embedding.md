@@ -1,0 +1,105 @@
+Title: GeoGebra Apps Embedding :: GeoGebra Manual
+
+URL Source: https://geogebra.github.io/docs/reference/en/GeoGebra_Apps_Embedding/
+
+Markdown Content:
+This page describes how to embed GeoGebra Apps into your website. For more information on how to interact with embedded apps, please see [GeoGebra Apps API](https://geogebra.github.io/docs/reference/en/GeoGebra_Apps_API/).
+
+## [](https://geogebra.github.io/docs/reference/en/GeoGebra_Apps_Embedding/#_quick_start)Quick Start
+
+In order to embed GeoGebra apps into your page, you need to add the following three parts:
+
+1 Make sure you have this in the `<head>` section to make sure scaling works correctly (eg on mobile browsers) and that Unicode works
+
+<meta name=viewport content="width=device-width,initial-scale=1">
+<meta charset="utf-8"/>
+
+2 The javascript library deployggb.js needs to be included with this tag:
+
+<script src="https://www.geogebra.org/apps/deployggb.js"></script>
+
+3 Create an element for the GeoGebra app on your page:
+
+<div id="ggb-element"></div>
+
+4 Configure and insert the app:
+
+<script>
+    var params = {"appName": "graphing", "width": 800, "height": 600, "showToolBar": true, "showAlgebraInput": true, "showMenuBar": true };
+    var applet = new GGBApplet(params, true);
+    window.addEventListener("load", function() {
+        applet.inject('ggb-element');
+    });
+</script>
+
+Simply change the `appName` parameter from `graphing` to `geometry` or `3d` to get one of our other apps. To load an activity you can use eg `"material_id":"RHYH3UQ8"` or `"filename":"myFile.ggb"` and you can customize our apps further by using various [GeoGebra App Parameters](https://geogebra.github.io/docs/reference/en/GeoGebra_App_Parameters/).
+
+## [](https://geogebra.github.io/docs/reference/en/GeoGebra_Apps_Embedding/#_tutorial)Tutorial
+
+## [](https://geogebra.github.io/docs/reference/en/GeoGebra_Apps_Embedding/#_geogebra_apps_api)GeoGebra Apps API
+
+## [](https://geogebra.github.io/docs/reference/en/GeoGebra_Apps_Embedding/#_offline_and_self_hosted_solution)Offline and Self-Hosted Solution
+
+We suggest you to use the GeoGebra Apps from our global and super-fast server network www.geogebra.org as shown above, but in case you prefer to host and update the GeoGebra apps yourself, you can [download our GeoGebra Math Apps Bundle](https://download.geogebra.org/package/geogebra-math-apps-bundle) The embed codes are almost the same as above, with two differences: the tag for including deployggb.js needs to be changed to
+
+    <script src="GeoGebra/deployggb.js"></script>
+
+and you need to include the following line before the inject() call:
+
+    applet.setHTML5Codebase('GeoGebra/HTML5/5.0/web3d/');
+
+Alternatively if you just need to fix to a specific version then you can still use the CDN like this (don’t change the `5.0.` just the `498`)
+
+    applet.setHTML5Codebase("https://www.geogebra.org/apps/5.0.498.0/web3d");
+
+For technical reasons, you need to use `5.4` not `5.0` after version 911 eg
+
+    applet.setHTML5Codebase("https://www.geogebra.org/apps/5.4.907.0/web3d");
+
+## [](https://geogebra.github.io/docs/reference/en/GeoGebra_Apps_Embedding/#_adjusting_embedded_apps_appearance)Adjusting embedded apps appearance
+
+This feature is currently available only for GeoGebra Notes. To change the colors of the UI elements, you can set some CSS variables
+
+<style>
+body {
+  --ggb-primary-color: #ee0290; /* used for most UI elements, including the toolbar header and buttons */
+  --ggb-primary-variant-color: #880061; /* used for floating buttons on hover */
+  --ggb-dark-color: #880061; /* used for highlighted text in dialogs */
+  --ggb-light-color: #f186c0; /* used for progress bar */
+}
+</style>
+
+## [](https://geogebra.github.io/docs/reference/en/GeoGebra_Apps_Embedding/#_speed_up_loading_time_with_a_service_worker)Speed up loading time with a service worker
+
+You can speed up loading of the GeoGebra library by using a service worker. To use a service worker you should set a specific version of GeoGebra using `setHTML5Codebase()`.
+
+To install the service worker, first you have to include the _sworker-locked.js_ file under your domain (e.g. _www.example.com/path/sworker-locked.js_). The service worker file can be found under the _GeoGebra/HTML5/5.0/web3d/_ folder in the _GeoGebra Math Apps Bundle_.
+
+Next, include the following snippet on the page where GeoGebra is loaded. Please change the path to the service worker. You can also set the appletLocation variable to enable the worker only in a specific folder (or leave it as '/' to use it on all pages of your domain):
+
+   var serviceWorkerPath = '/sworker-locked.js'
+   var appletLocation = '/'
+
+   function isServiceWorkerSupported() {
+       return 'serviceWorker' in navigator && location.protocol === "https:";
+   }
+
+   function installServiceWorker() {
+       if (navigator.serviceWorker.controller) {
+           console.log("Service worker is already controlling the page.");
+       } else {
+           navigator.serviceWorker.register(serviceWorkerPath, {
+               scope: appletLocation
+           });
+       }
+   }
+
+   if (isServiceWorkerSupported()) {
+       window.addEventListener('load', function() {
+           installServiceWorker()
+       });
+   } else {
+       console.log("Service workers are not supported.");
+   }
+
+With this installed, when a user opens the page where the service worker is enabled, the application scripts get downloaded and cached by the service worker. This way, the next time that same user visits the page, the scripts are loaded from the cache instead of downloading them again from the servers.
