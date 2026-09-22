@@ -83,7 +83,24 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 
 ## 部署到 EdgeOne（3 步，约 10 分钟）
 
-### 准备：一个模型 API Key
+### 准备：两样东西
+
+**① 一个模型 API Key** —— AI 的「大脑钥匙」。需要一个 **OpenAI 兼容格式** 的模型服务，例如 tokenhub 平台的 Key、DeepSeek 官方 Key 等。
+
+拿到两样东西：
+- **Key**：形如 `sk-xxxx`
+- **接口地址（Base URL）**：形如 `https://api.deepseek.com/v1`
+
+> 提示：作图效果需要较强的模型（DeepSeek-V3 / GPT-4o 级别以上）。
+
+**② 部署工具**：服务器上或本机需要能执行部署命令——
+
+```bash
+npm install -g edgeone     # 安装 EdgeOne CLI
+edgeone login              # 登录你的 EdgeOne 账号
+```
+
+### 第 1 步：填 Key
 
 这是 AI 的「大脑钥匙」。你需要一个 **OpenAI 兼容格式** 的模型服务，例如 tokenhub 平台的 Key、DeepSeek 官方 Key 等。
 
@@ -95,11 +112,13 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 
 ### 第 1 步：填 Key
 
-用任何编辑器打开项目根目录的 `.env` 文件，把 Key 填进去：
+把项目里的 `.env.example` 复制一份，重命名为 `.env`，打开填入你的 Key：
 
 ```
 MODEL_API_KEY=sk-你的Key
 ```
+
+（项目里已提供 `.env.example` 模板，照着填就行）
 
 > 这个 Key 只保存在服务器端，不会暴露给浏览器——访客打开网页无需任何配置。
 
@@ -135,7 +154,8 @@ edgeone makers dev
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `MODEL_API_KEY` | 是 | 模型服务 Key，部署时自动注入服务端，访客无需配置 |
-| `AI_GATEWAY_MODEL` | 否 | 默认模型（页面右上角可随时切换） |
+
+> 想换模型不需要改环境变量——打开网页，在右上角直接修改模型名和接口地址即可。
 
 ## 工作原理
 
@@ -169,7 +189,8 @@ edgeone makers dev
 │   └── llm-proxy/         # EdgeOne 云函数：LLM 请求代理
 ├── doc/                   # 效果截图与参考文档
 ├── edgeone.json           # EdgeOne 部署配置
-└── .env                   # MODEL_API_KEY（不提交到仓库）
+├── .env.example           # 环境变量模板（复制为 .env 使用）
+└── .env                   # 你的实际配置（不提交到仓库）
 ```
 
 ## 更多文档
