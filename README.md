@@ -116,6 +116,8 @@ edgeone login              # 登录你的 EdgeOne 账号
 
 ```
 MODEL_API_KEY=sk-你的Key
+MODEL_BASE_URL=https://你的接口地址/v1
+MODEL_NAME=你的模型名
 ```
 
 （项目里已提供 `.env.example` 模板，照着填就行）
@@ -154,6 +156,8 @@ edgeone makers dev
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `MODEL_API_KEY` | 是 | 模型服务 Key，部署时自动注入服务端，访客无需配置 |
+| `MODEL_BASE_URL` | 推荐 | 模型服务接口地址（.env 里已提供示例） |
+| `MODEL_NAME` | 否 | 默认模型名（也可在页面右上角随时切换） |
 
 > 想换模型不需要改环境变量——打开网页，在右上角直接修改模型名和接口地址即可。
 

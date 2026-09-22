@@ -47,8 +47,8 @@ const LS_BASE_URL = "geochat-web-base-url";
 
 export default function App() {
   const [apiKey, setApiKey] = createSignal(localStorage.getItem(LS_KEY) ?? "");
-  const [model, setModel] = createSignal(localStorage.getItem(LS_MODEL) ?? "deepseek/deepseek-flash");
-  const [baseUrl, setBaseUrl] = createSignal(localStorage.getItem(LS_BASE_URL) ?? "https://tokenhub.tencentmaas.com/v1");
+  const [model, setModel] = createSignal(localStorage.getItem(LS_MODEL) ?? "");
+  const [baseUrl, setBaseUrl] = createSignal(localStorage.getItem(LS_BASE_URL) ?? "");
   const [messages, setMessages] = createSignal<UiMessage[]>([]);
   const [coreMessages, setModelMessages] = createSignal<ModelMessage[]>([]);
   const [input, setInput] = createSignal("");
@@ -59,15 +59,14 @@ export default function App() {
   let ggb: GeoGebraController | null = null;
   let scrollRef: HTMLDivElement | undefined;
 
-  // 服务端 Key 注入探测：云函数配了 MODEL_API_KEY 时前端无需填写 Key
+  // 服务端配置探测：云函数返回默认接口地址/模型名，并告知 Key 是否已服务端注入
   onMount(async () => {
     try {
       const res = await fetch("/llm-proxy");
       const data = await res.json();
-      if (data?.serverKey && !apiKey()) {
-        setApiKey("server-injected");
-        setBaseUrl((b) => b || "https://tokenhub.tencentmaas.com/v1");
-      }
+      if (data?.serverKey && !apiKey()) setApiKey("server-injected");
+      if (data?.baseURL && !baseUrl()) setBaseUrl(data.baseURL);
+      if (data?.model && !model()) setModel(data.model);
     } catch { /* 离线/后端不可用时维持原逻辑 */ }
   });
 

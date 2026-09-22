@@ -50,9 +50,14 @@ export async function onRequest(context: any) {
     return cors(new Response(null, { status: 204 }));
   }
 
-  // 探测端点：前端据此决定是否要求用户填写 Key
+  // 探测端点：前端据此决定是否要求用户填写 Key，并取默认接口地址与模型名
   if (method === "GET") {
-    return json({ ok: true, serverKey: Boolean(serverKey) });
+    return json({
+      ok: true,
+      serverKey: Boolean(serverKey),
+      baseURL: typeof env.MODEL_BASE_URL === "string" ? env.MODEL_BASE_URL : "",
+      model: typeof env.MODEL_NAME === "string" ? env.MODEL_NAME : "",
+    });
   }
 
   if (method !== "POST") {
