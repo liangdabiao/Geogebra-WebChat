@@ -7,3 +7,5 @@ dist
 /.claude
 /.playwright-mcp
 .edgeone
+geochat_port.tmp.txt
+*.tmp.txt
