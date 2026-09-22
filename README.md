@@ -2,7 +2,17 @@
 
 > 一句话在浏览器里创建可交互的数学图形。输入自然语言描述，AI 自动生成 GeoGebra 命令并在实时画板中呈现。
 
-[![使用 EdgeOne Makers 部署](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2Fliangdabiao%2FGeogebra-WebChat)
+[![一键 EdgeOne Makers 部署](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2Fliangdabiao%2FGeogebra-WebChat)
+
+## 环境变量安装配置
+
+| 变量 | 必填 | 说明 |
+|---|---|---|
+| `MODEL_API_KEY` | 是 | 模型服务 Key，部署时自动注入服务端，（sk-xxxxxxxxxxxxxxxxxxx） |
+| `MODEL_BASE_URL` | 推荐 | 模型服务接口地址（ https://tokenhub.tencentmaas.com/v1 ） |
+| `MODEL_NAME` | 否 | 默认模型名（ deepseek/deepseek-flash ） |
+
+
 
 ---
 
