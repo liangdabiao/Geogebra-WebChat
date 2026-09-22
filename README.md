@@ -9,8 +9,8 @@
 | 变量 | 必填 | 说明 |
 |---|---|---|
 | `MODEL_API_KEY` | 是 | 模型服务 Key，部署时自动注入服务端，（sk-xxxxxxxxxxxxxxxxxxx） |
-| `MODEL_BASE_URL` | 推荐 | 模型服务接口地址（ https://tokenhub.tencentmaas.com/v1 ） |
-| `MODEL_NAME` | 否 | 默认模型名（ deepseek/deepseek-flash ） |
+| `MODEL_BASE_URL` | 是 | 模型服务接口地址（ https://tokenhub.tencentmaas.com/v1 ） |
+| `MODEL_NAME` | 是 | 默认模型名（ deepseek/deepseek-flash ） |
 
 
 
