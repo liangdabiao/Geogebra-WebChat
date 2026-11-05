@@ -184,6 +184,17 @@ export async function onRequest(context: any) {
   else if (raw && typeof raw === "object") body = JSON.stringify(raw);
   else body = "";
 
+  // EdgeOne Cloud Functions 请求体上限 6MB；图片以 base64 嵌在 JSON 里会膨胀约 1/3。
+  // 超限时提前返回可读错误，避免被平台直接截断成难以定位的错误。
+  const bodyBytes = new TextEncoder().encode(body).length;
+  if (bodyBytes > 5_500_000) {
+    return json(
+      { error: `请求体过大（${Math.round(bodyBytes / 1024)}KB）：请减少图片数量或换用更小的图片` },
+      413,
+      corsOrigin,
+    );
+  }
+
   let upstream: Response;
   try {
     upstream = await fetch(target, {
@@ -193,6 +204,42 @@ export async function onRequest(context: any) {
     });
   } catch (e) {
     return json({ error: "upstream fetch failed: " + (e as Error).message }, 502, corsOrigin);
+  }
+
+  // 上游非 2xx 时，把常见的额度/鉴权错误翻译成可操作的中文提示。
+  // 错误响应不是流，可以安全读取；正常响应仍保持原样的 SSE 透传。
+  if (!upstream.ok) {
+    let detail = "";
+    try {
+      const rawText = await upstream.text();
+      try {
+        const parsedErr = JSON.parse(rawText);
+        detail = String(parsedErr?.error?.message ?? parsedErr?.message ?? rawText);
+      } catch {
+        detail = rawText;
+      }
+    } catch { /* 响应体不可读时忽略 */ }
+    detail = detail.slice(0, 400);
+
+    const quota = upstream.status === 402 || /insufficient.*quota|quota.*exceed|额度/i.test(detail);
+    let message: string;
+    if (quota && parsed.host.toLowerCase() === "ai-gateway.edgeone.link") {
+      message =
+        "EdgeOne Makers 内置模型免费额度已用尽（50 万 token/月，按账号共享，重新创建 Key 无效）。" +
+        "请绑定 BYOK、提交工单提额，或在页面右上角改用自己的模型服务地址与 API Key。";
+    } else if (quota) {
+      message =
+        "模型服务返回额度或余额不足（402），请检查该服务商的账户余额与 API Key；" +
+        "也可在页面右上角切换到别的模型服务。";
+    } else {
+      message = `模型服务返回 ${upstream.status}：${detail || "无详细信息"}`;
+    }
+
+    return json(
+      { error: message, code: quota ? "quota_exhausted" : "upstream_error", upstreamStatus: upstream.status },
+      upstream.status,
+      corsOrigin,
+    );
   }
 
   const resHeaders = new Headers(upstream.headers);

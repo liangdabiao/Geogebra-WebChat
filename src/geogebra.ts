@@ -1,7 +1,12 @@
 /**
- * GeoGebra 画板控制器（极简版）。
- * 通过官方 CDN 加载 deployggb.js，注入 GGBApplet，并提供命令执行 / 视角切换 / 清空 / 读 XML 能力。
- * 从原项目 src/renderer/src/geogebra*.ts 精简而来，去掉 vendor 依赖与复杂重挂逻辑。
+ * GeoGebra 画板控制器。
+ * 通过本地 vendor 的 deployggb.js 注入 GGBApplet，提供命令执行 / 视角切换 / 清空 / 读 XML，
+ * 以及文件导出（.ggb / TikZ / SVG / PNG）与 .ggb 打开能力。
+ *
+ * 本项目自带 GeoGebra 5.0 web3d 构建（/geogebra/HTML5/5.0/web3d/）。
+ * 该构建暴露了 getBase64()（返回 base64 编码的标准 .ggb）、exportPGF(callback)、
+ * exportSVG(callback)、getPNGBase64()、setBase64() 等 API；其中 exportPGF 未写入官方文档，
+ * 因此所有调用都做能力检测 + 超时 + 由上层降级处理，不能假定一定可用。
  */
 
 declare global {
@@ -24,6 +29,34 @@ export interface ExecuteResult {
   failed: string[];
 }
 
+/** 画板导出能力探测结果。 */
+export interface ExportCapabilities {
+  ggb: boolean;
+  tikz: boolean;
+  svg: boolean;
+  png: boolean;
+  openGgb: boolean;
+  version: string;
+}
+
+/** 供 TikZ 降级生成器使用的对象快照。 */
+export interface GgbObjectInfo {
+  name: string;
+  type: string;
+  x: number;
+  y: number;
+  z: number;
+  value: string;
+  definition: string;
+  color: string;
+  visible: boolean;
+  lineThickness: number;
+  pointSize: number;
+  filling: number;
+  caption: string;
+  labelVisible: boolean;
+}
+
 export interface GeoGebraController {
   isReady: () => boolean;
   ready: () => Promise<void>;
@@ -31,6 +64,18 @@ export interface GeoGebraController {
   setPerspective: (mode: string) => Promise<void>;
   reset: () => Promise<void>;
   getXML: () => string;
+  /** base64 编码的标准 .ggb 文件（不含 data URL 前缀）。 */
+  getGgbBase64: () => Promise<string>;
+  /** 载入 base64 编码的 .ggb 文件。 */
+  openGgbBase64: (base64: string) => Promise<void>;
+  /** GeoGebra 原生 PGF/TikZ 导出（未公开 API，可能失败）。 */
+  exportTikZ: () => Promise<string>;
+  exportSVG: () => Promise<string>;
+  /** base64 编码的 PNG。 */
+  exportPNGBase64: () => Promise<string>;
+  getVersion: () => string;
+  capabilities: () => ExportCapabilities;
+  inspectObjects: () => GgbObjectInfo[];
 }
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -48,6 +93,12 @@ function loadDeployScript(): Promise<void> {
     document.head.appendChild(s);
   });
   return deployPromise;
+}
+
+/** 去掉可能存在的 data URL 前缀，只留纯 base64。 */
+function stripDataUrl(s: string): string {
+  const i = s.indexOf("base64,");
+  return i >= 0 ? s.slice(i + 7) : s;
 }
 
 function evalOne(api: any, command: string): boolean {
@@ -69,7 +120,7 @@ function evalOne(api: any, command: string): boolean {
 async function clearAll(api: any): Promise<void> {
   if (!api) return;
   try {
-    const names: string[] = api.getAllObjectNames ? api.getAllObjectNames() : [];
+    const names: string[] = api.getAllObjectNames ? Array.from(api.getAllObjectNames()) : [];
     for (const n of names) {
       try {
         api.deleteObject(n);
@@ -96,6 +147,58 @@ async function applyPerspective(api: any, mode: string): Promise<void> {
     if (typeof api.evalCommand === "function") api.evalCommand(`SetPerspective("${mode}")`);
   } catch {
     /* ignore */
+  }
+}
+
+/**
+ * 调用「以回调函数交付字符串」的 GeoGebra API。
+ * 这类方法（exportPGF / exportSVG / getBase64 / getScreenshotBase64）在不同版本里
+ * 可能是同步返回，也可能是异步回调，甚至静默不回调，因此统一加超时。
+ */
+function callStringApi(api: any, method: string, timeoutMs = 10_000): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    if (typeof api?.[method] !== "function") {
+      reject(new Error(`画板不支持 ${method}`));
+      return;
+    }
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`${method} 超时（${timeoutMs}ms）`));
+    }, timeoutMs);
+    const finish = (value: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (typeof value === "string" && value.trim().length > 0) resolve(value);
+      else reject(new Error(`${method} 未返回内容`));
+    };
+    try {
+      api[method](finish);
+    } catch (e) {
+      settled = true;
+      clearTimeout(timer);
+      reject(e);
+    }
+  });
+}
+
+function safeString(fn: () => unknown): string {
+  try {
+    const v = fn();
+    return v == null ? "" : String(v);
+  } catch {
+    return "";
+  }
+}
+
+function safeNumber(fn: () => unknown): number {
+  try {
+    const v = Number(fn());
+    return Number.isFinite(v) ? v : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -137,6 +240,40 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
   });
 
   await ready;
+
+  const has = (name: string) => typeof api?.[name] === "function";
+  const getVersion = () => (has("getVersion") ? safeString(() => api.getVersion()) : "unknown");
+
+  /** 遍历画板对象，取几何与样式信息，供 TikZ 降级生成器使用。 */
+  const inspectObjects = (): GgbObjectInfo[] => {
+    if (!has("getAllObjectNames")) return [];
+    let names: string[] = [];
+    try {
+      names = Array.from(api.getAllObjectNames()).map(String);
+    } catch {
+      return [];
+    }
+    return names.map((name) => ({
+      name,
+      type: has("getObjectType") ? safeString(() => api.getObjectType(name)).toLowerCase() : "",
+      x: has("getXcoord") ? safeNumber(() => api.getXcoord(name)) : 0,
+      y: has("getYcoord") ? safeNumber(() => api.getYcoord(name)) : 0,
+      z: has("getZcoord") ? safeNumber(() => api.getZcoord(name)) : 0,
+      value: has("getValueString") ? safeString(() => api.getValueString(name, false)) : "",
+      definition: has("getDefinitionString") ? safeString(() => api.getDefinitionString(name, false)) : "",
+      color: has("getColor") ? safeString(() => api.getColor(name)) : "",
+      visible: has("getVisible")
+        ? (() => { try { return !!api.getVisible(name); } catch { return true; } })()
+        : true,
+      lineThickness: has("getLineThickness") ? safeNumber(() => api.getLineThickness(name)) : 1,
+      pointSize: has("getPointSize") ? safeNumber(() => api.getPointSize(name)) : 3,
+      filling: has("getFilling") ? safeNumber(() => api.getFilling(name)) : 0,
+      caption: has("getCaption") ? safeString(() => api.getCaption(name, false)) : "",
+      labelVisible: has("getLabelVisible")
+        ? (() => { try { return !!api.getLabelVisible(name); } catch { return false; } })()
+        : false,
+    }));
+  };
 
   return {
     isReady: () => !!api,
@@ -184,5 +321,63 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
         return "";
       }
     },
+    getGgbBase64: async () => {
+      await ready;
+      if (!has("getBase64")) throw new Error("画板不支持 .ggb 导出（缺少 getBase64）");
+      // 5.0 构建：无参或 (_, false) 会同步返回打包好的 base64 .ggb
+      for (const attempt of [() => api.getBase64(), () => api.getBase64(null, false)]) {
+        try {
+          const r = attempt();
+          if (typeof r === "string" && r.length > 8) return stripDataUrl(r);
+        } catch {
+          /* 继续尝试下一种调用方式 */
+        }
+      }
+      // 其他版本可能只提供 callback 形式
+      return stripDataUrl(await callStringApi(api, "getBase64", 12_000));
+    },
+    openGgbBase64: async (base64) => {
+      await ready;
+      if (!has("setBase64")) throw new Error("画板不支持打开 .ggb（缺少 setBase64）");
+      try {
+        api.setBase64(base64);
+      } catch (e) {
+        throw new Error("载入 .ggb 失败：" + (e as Error).message);
+      }
+      // setBase64 在部分版本是异步生效，给构造一点加载时间
+      await delay(400);
+    },
+    exportTikZ: async () => {
+      await ready;
+      // exportPGF 是未公开 API；超时后由上层走降级生成器，别让用户等太久
+      return callStringApi(api, "exportPGF", 8_000);
+    },
+    exportSVG: async () => {
+      await ready;
+      return callStringApi(api, "exportSVG", 10_000);
+    },
+    exportPNGBase64: async () => {
+      await ready;
+      if (has("getPNGBase64")) {
+        try {
+          const r = api.getPNGBase64(1, false, 72);
+          if (typeof r === "string" && r.length > 8) return stripDataUrl(r);
+        } catch {
+          /* 回退到截图 API */
+        }
+      }
+      if (!has("getScreenshotBase64")) throw new Error("画板不支持 PNG 导出");
+      return stripDataUrl(await callStringApi(api, "getScreenshotBase64", 10_000));
+    },
+    getVersion,
+    capabilities: () => ({
+      ggb: has("getBase64"),
+      tikz: has("exportPGF"),
+      svg: has("exportSVG"),
+      png: has("getPNGBase64") || has("getScreenshotBase64"),
+      openGgb: has("setBase64"),
+      version: getVersion(),
+    }),
+    inspectObjects,
   };
 }

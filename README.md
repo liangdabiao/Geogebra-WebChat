@@ -36,6 +36,20 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 - **2D / 3D 支持**：平面几何和立体图形均可
 - **多模型兼容**：通过 OpenAI 兼容 API，可切换任意大模型（DeepSeek、通义千问、GPT 等）
 - **服务端 Key 注入**：可选隐藏 API Key，不暴露给浏览器
+- **多格式导出**：一键导出 `.ggb`、PGF/TikZ `.tex`、PNG、SVG，并可复制 `tikzpicture` 片段
+- **打开 .ggb**：载入已有构造继续编辑
+- **图片读题**：输入框支持上传 / 粘贴 / 拖入图片，模型读图后生成 GeoGebra 命令并作图
+
+---
+
+## 导出与图片上传
+
+画板上方工具栏提供 `.ggb`、TikZ、PNG、SVG 导出与「打开 .ggb」。
+
+- `.ggb` 走 GeoGebra 的 `getBase64()`，得到标准二进制构造文件，可被桌面版直接打开；「打开 .ggb」用 `setBase64()` 回载。
+- TikZ 优先调用本地 GeoGebra 5.0 构建里的 `exportPGF(callback)`（该 API 未列入官方文档）；若超时或失败，自动降级到基于对象快照的自研生成器，最后再降级为导出 SVG。产物是可编译的完整 `.tex`，「复制 TikZ」给的是 `tikzpicture` 片段。PGF/TikZ 只覆盖 2D 图形视图。
+- 图片上传后统一缩放到长边 ≤1280px 并转 JPEG，控制在几百 KB，最多 4 张。这是为了适应 EdgeOne Cloud Functions 6MB 请求体上限；图片只在工具循环首步发送，历史轮自动剥离，避免 6 步循环重复传图。
+- 图片以 base64 嵌在 OpenAI 兼容的 `image_url` 里经 `/llm-proxy` 转发，因此**所用模型需要支持图片输入**。
 
 ---
 
@@ -72,7 +86,10 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 │   ├── ai-client.ts         # AI 工具循环（核心）
 │   ├── geogebra.ts          # CDN 加载 + 画板控制
 │   ├── styles.css
-│   └── lib/normalize.ts     # 命令规范化（中文别名→英文）
+│   └── lib/
+│       ├── normalize.ts     # 命令规范化（中文别名→英文）
+│       ├── export.ts        # .ggb / TikZ / SVG / PNG 导出与 TikZ 降级生成
+│       └── image.ts         # 图片压缩与 base64 产出
 ├── cloud-functions/
 │   └── llm-proxy/           # EdgeOne 云函数：LLM 请求代理
 ├── doc/                     # 效果截图与参考文档
@@ -151,6 +168,18 @@ edgeone makers dev
 > 填了 `MAKERS_MODELS_KEY` 后，云函数整组走 EdgeOne 网关，旧的 `MODEL_BASE_URL` / `MODEL_NAME` / `MODEL_API_KEY`（第三方配置）会被忽略。
 > 想换模型不用改代码——在 `.env` 里改 `MAKERS_MODEL` 即可；
 > 页面右上角的输入框也仍然可以直接覆盖，方便临时调试。
+
+## 常见问题：Insufficient remaining quota
+
+页面提示 `Insufficient remaining quota to process this request`（HTTP 402）时，表示 **EdgeOne Makers 内置模型免费额度已用尽**。免费版为每月 50 万 token，**按账号维度计算、所有项目共享**，因此换一个新的网关 Key 不会重置额度，改用其它 `@makers/*` 模型也一样；账号未绑定 BYOK 厂商密钥时，网关里也没有可切换的付费模型。
+
+可选处理：
+
+1. **绑定自有厂商密钥（BYOK，改动最小）**：在 Makers 控制台 → Models 绑定厂商 Key，然后在页面右上角把模型名改成 `provider/model` 格式（如 `deepseek/deepseek-chat`）。网关地址、服务端注入的 Key、云函数白名单都不需要改。
+2. **提交工单提额，或等下个计费周期重置**：免费额度以开通 Makers 服务的日期为周期起点按月重置。
+3. **直连第三方模型服务**：页面右上角填写自己的 `Base URL` + 模型名 + `API Key`（云函数白名单已含 `api.deepseek.com`、`api.openai.com`、`api.moonshot.cn` 等）。切换到非网关地址时，界面会自动清掉服务端注入的占位 Key，此时必须填入真实 Key，否则会得到 401。
+
+> 云函数与前端会把 402 翻译成带上述处理建议的中文提示；若仍看到英文原文，说明访问的是旧部署。
 
 ## 工作原理
 

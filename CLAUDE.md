@@ -14,6 +14,8 @@ Geogebra Webchat — AI 驱动的数学几何画板。用户输入自然语言�
   - `src/ai-client.ts` — 核心浏览器内 AI 工具循环：Vercel AI SDK `streamText` + `executeGeoGebraCommands` 工具；所有 LLM 请求经 `proxyFetch` 改写到 `/llm-proxy`（带 `x-target-url` 头）
   - `src/geogebra.ts` — GeoGebra CDN 加载 + 画板控制（evalCommand、XML 快照恢复）
   - `src/lib/normalize.ts` — 中文命令别名 → GeoGebra 英文命令规范化
+  - `src/lib/export.ts` — 下载工具、TikZ 文本规整、基于对象快照的 TikZ 降级生成器
+  - `src/lib/image.ts` — 上传图片缩放 / JPEG 重编码，产出纯 base64
 - **后端**：唯一后端是云函数 `cloud-functions/llm-proxy/index.ts`（路由 `/llm-proxy`）
   - 职责：CORS、按 `x-target-url` 透明转发（含 SSE 流式）、`MODEL_API_KEY` 服务端注入、GET 探测（返回 `{ serverKey }`）
   - 注意：`context.request.headers` 是 Web Headers 实例，必须用 `.get(name)` 读取
@@ -45,3 +47,5 @@ edgeone makers deploy -n geogebra-webchat   # 部署到 EdgeOne
 3. GeoGebra 命令一律英文；中文别名由 `src/lib/normalize.ts` 处理
 4. 画板命令失败时恢复 XML 快照（`restoreOnError`），避免画板脏状态
 5. 效果截图与参考文档在 `doc/` 目录
+6. 导出走 `src/lib/export.ts` + `src/geogebra.ts` 接出的 API：`.ggb` 用 `getBase64()`、「打开 .ggb」用 `setBase64()`、TikZ 用未公开的 `exportPGF(cb)`（**必须保留三档降级**：原生导出 → 基于对象快照的生成器 → 导出 SVG）
+7. 图片统一经 `src/lib/image.ts` 压缩后才发给模型；`/llm-proxy` 有 5.5MB 请求体保护，图片只在工具循环首步携带（`prepareStep`），历史轮自动剥离
