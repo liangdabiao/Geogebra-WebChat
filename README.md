@@ -83,15 +83,9 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 
 ## 部署到 EdgeOne（3 步，约 10 分钟）
 
-### 准备：两样东西
+### 准备：一个 EdgeOne 网关 Key
 
-**① 一个模型 API Key** —— AI 的「大脑钥匙」。需要一个 **OpenAI 兼容格式** 的模型服务，例如 tokenhub 平台的 Key、DeepSeek 官方 Key 等。
-
-拿到两样东西：
-- **Key**：形如 `sk-xxxx`
-- **接口地址（Base URL）**：形如 `https://api.deepseek.com/v1`
-
-> 提示：作图效果需要较强的模型（DeepSeek-V3 / GPT-4o 级别以上）。
+**① 模型 Key** —— 走 EdgeOne 平台内置模型，**不需要**任何第三方大模型厂商的 Key 或接口地址。
 
 **② 部署工具**：服务器上或本机需要能执行部署命令——
 
@@ -100,29 +94,25 @@ npm install -g edgeone     # 安装 EdgeOne CLI
 edgeone login              # 登录你的 EdgeOne 账号
 ```
 
-### 第 1 步：填 Key
+### 第 1 步：拿一个 EdgeOne 免费 Key
 
-这是 AI 的「大脑钥匙」。你需要一个 **OpenAI 兼容格式** 的模型服务，例如 tokenhub 平台的 Key、DeepSeek 官方 Key 等。
+项目默认走 **EdgeOne Makers 内置模型网关**，不需要对接任何第三方大模型厂商：
 
-拿到两样东西：
-- **Key**：形如 `sk-xxxx`
-- **接口地址（Base URL）**：形如 `https://api.deepseek.com/v1`
-
-> 提示：作图效果需要较强的模型（DeepSeek-V3 / GPT-4o 级别以上）。
-
-### 第 1 步：填 Key
-
-把项目里的 `.env.example` 复制一份，重命名为 `.env`，打开填入你的 Key：
+1. 打开 [Makers 控制台 → Models → API Key](https://console.tencentcloud.com/edgeone/makers?tab=models&subTab=apikey)
+2. 创建一个网关 Key（新账号赠送免费 Token，限时 50 万）
+3. 把项目里的 `.env.example` 复制一份改名为 `.env`，只填这一行：
 
 ```
-MODEL_API_KEY=sk-你的Key
-MODEL_BASE_URL=https://你的接口地址/v1
-MODEL_NAME=你的模型名
+MAKERS_MODELS_KEY=你的网关Key
 ```
 
-（项目里已提供 `.env.example` 模板，照着填就行）
+网关地址和模型名都有内置默认值，不需要填：
 
-> 这个 Key 只保存在服务器端，不会暴露给浏览器——访客打开网页无需任何配置。
+- 网关：`https://ai-gateway.edgeone.link/v1`（OpenAI 兼容，原生 SSE 流式）
+- 模型：`@makers/deepseek-v4-flash`（内置免费，无需绑定厂商密钥）
+
+> Key 只保存在服务端，不会暴露给浏览器——访客打开网页无需任何配置。
+> 想换模型不用改代码：在 `.env` 里加 `MAKERS_MODEL=@makers/其他内置模型` 即可（目前内置模型只有 `@makers/deepseek-v4-flash`）。
 
 ### 第 2 步：部署
 
@@ -155,11 +145,12 @@ edgeone makers dev
 
 | 变量 | 必填 | 说明 |
 |---|---|---|
-| `MODEL_API_KEY` | 是 | 模型服务 Key，部署时自动注入服务端，访客无需配置 |
-| `MODEL_BASE_URL` | 推荐 | 模型服务接口地址（.env 里已提供示例） |
-| `MODEL_NAME` | 否 | 默认模型名（也可在页面右上角随时切换） |
+| `MAKERS_MODELS_KEY` | 是 | EdgeOne Makers 网关 Key，部署时注入服务端，访客无需配置 |
+| `MAKERS_MODEL` | 否 | 留空即用 `@makers/deepseek-v4-flash` |
 
-> 想换模型不需要改环境变量——打开网页，在右上角直接修改模型名和接口地址即可。
+> 填了 `MAKERS_MODELS_KEY` 后，云函数整组走 EdgeOne 网关，旧的 `MODEL_BASE_URL` / `MODEL_NAME` / `MODEL_API_KEY`（第三方配置）会被忽略。
+> 想换模型不用改代码——在 `.env` 里改 `MAKERS_MODEL` 即可；
+> 页面右上角的输入框也仍然可以直接覆盖，方便临时调试。
 
 ## 工作原理
 

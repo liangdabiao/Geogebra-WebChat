@@ -6,7 +6,7 @@
 
 Geogebra Webchat — AI 驱动的数学几何画板。用户输入自然语言数学题，AI（浏览器内 Vercel AI SDK 工具循环）生成 GeoGebra 命令并在实时画板执行，随后用文字解释几何关系。
 
-**部署平台：EdgeOne Pages**（本项目为纯 EdgeOne 架构，没有独立服务器/Node 进程）。
+**部署平台：EdgeOne Makers**（本项目为纯 EdgeOne 架构，没有独立服务器/Node 进程）。
 
 ## 架构
 
@@ -21,8 +21,14 @@ Geogebra Webchat — AI 驱动的数学几何画板。用户输入自然语言�
 
 ## 环境变量
 
-- `MODEL_API_KEY` — 模型服务 Key（服务端注入，写在 `.env`，部署时同步；`.env` 不入库）
-- 默认模型 `deepseek/deepseek-flash`，前端右上角可改（默认值在 `src/App.tsx`）
+- `MAKERS_MODELS_KEY` — EdgeOne Makers 网关 Key（写在 `.env`，部署时同步；`.env` 不入库）。
+  它是默认且首选的模型来源；只有它为空时才回退旧的 `MODEL_API_KEY`（第三方配置）。
+- 模型来源默认走 EdgeOne 内置网关：`https://ai-gateway.edgeone.link/v1` +
+  `@makers/deepseek-v4-flash`（内置模型有免费额度，无需绑定厂商密钥）。
+  两个值都是 `cloud-functions/llm-proxy/index.ts` 里的 `DEFAULT_*` 常量。
+- **Key 与端点必须成组切换**：配了 `MAKERS_MODELS_KEY` 就整组走 EdgeOne 网关并忽略
+  `MODEL_BASE_URL` / `MODEL_NAME` / `MODEL_API_KEY`；否则会「拿 A 的 Key 打 B 的网关」→ 401。
+  换内置模型用 `MAKERS_MODEL`（目前内置只有 `@makers/deepseek-v4-flash`）。
 
 ## 本地开发与部署
 

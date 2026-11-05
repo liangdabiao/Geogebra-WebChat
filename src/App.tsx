@@ -41,9 +41,12 @@ interface UiMessage {
 let _id = 1;
 const nextId = () => _id++;
 
-const LS_KEY = "geochat-web-key";
-const LS_MODEL = "geochat-web-model";
-const LS_BASE_URL = "geochat-web-base-url";
+// v2 前缀：默认模型由第三方服务商切换为 EdgeOne Makers 内置网关（免费额度）。
+// 换前缀可让老访客 localStorage 里的旧 baseURL / 模型名自动失效，
+// 不会被缓存悄悄带回第三方接口。
+const LS_KEY = "geochat-web-v2-key";
+const LS_MODEL = "geochat-web-v2-model";
+const LS_BASE_URL = "geochat-web-v2-base-url";
 
 export default function App() {
   const [apiKey, setApiKey] = createSignal(localStorage.getItem(LS_KEY) ?? "");
@@ -111,7 +114,10 @@ export default function App() {
       return;
     }
     if (!apiKey()) {
-      alert("请先在右上角填写模型 API Key");
+      alert(
+        "服务端还没配置模型 Key。\n请在 EdgeOne Makers 控制台 → Models → API Key 创建一个网关 Key，" +
+          "写入项目环境变量 MAKERS_MODELS_KEY 后重新部署（内置模型有免费额度，无需绑定第三方厂商）。"
+      );
       return;
     }
 
@@ -183,19 +189,19 @@ export default function App() {
           <input
             class="input-key"
             type="password"
-            placeholder="API Key（服务端已注入，无需填写）"
+            placeholder="API Key（EdgeOne 已注入，无需填写）"
             value={apiKey()}
             onInput={(e) => saveKey(e.currentTarget.value)}
           />
           <input
             class="input-model"
-            placeholder="模型"
+            placeholder="模型（默认 @makers/deepseek-v4-flash）"
             value={model()}
             onInput={(e) => saveModel(e.currentTarget.value)}
           />
           <input
             class="input-base-url"
-            placeholder="API Base URL (可选)"
+            placeholder="Base URL（默认 EdgeOne 网关）"
             value={baseUrl()}
             onInput={(e) => saveBaseUrl(e.currentTarget.value)}
           />

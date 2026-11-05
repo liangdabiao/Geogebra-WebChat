@@ -10,7 +10,8 @@ declare global {
   }
 }
 
-const DEPLOY_URL = "https://www.geogebra.org/apps/deployggb.js";
+const DEPLOY_URL = "/geogebra/deployggb.js";
+const HTML5_CODEBASE = "/geogebra/HTML5/5.0/web3d/";
 
 export interface ExecuteOptions {
   perspective?: string;
@@ -131,6 +132,7 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
       },
       true,
     );
+    applet.setHTML5Codebase(HTML5_CODEBASE);
     applet.inject(containerId);
   });
 
