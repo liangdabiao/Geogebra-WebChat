@@ -4,6 +4,18 @@
 
 [![一键 EdgeOne Makers 部署](https://cdnstatic.tencentcs.com/edgeone/pages/deploy.svg)](https://console.cloud.tencent.com/edgeone/makers/new?repository-url=https%3A%2F%2Fgithub.com%2Fliangdabiao%2FGeogebra-WebChat)
 
+## 在线体验（可直接打开测试）
+
+| 定位 | 地址 | 说明 |
+|---|---|---|
+| Cloudflare 自定义域（推荐） | https://geogebra-webchat.348349.xyz/ | 公开可访问，无需任何配置 |
+| Cloudflare Pages 默认域 | https://geogebra-webchat.pages.dev/ | 同一个部署的备用入口 |
+| EdgeOne（国内主站） | https://geogebra-webchat-mup5octs.edgeone.cool/ | 国内线路更快；预览域名有访问鉴权，见下方说明 |
+
+三者部署的是同一份源码、同一组 `MODEL_*` 变量，功能一致，可直接测试自然语言作图、图片读题、`.ggb` / TikZ / PNG / SVG 导出与「打开 .ggb」。
+
+> **EdgeOne 预览域名怎么用**：`*.edgeone.cool` 是带时效签名的预览链接，直接打开会返回 `401 UNAUTHORIZED`；`edgeone makers deploy` 每次会输出带 `eo_token` 的完整链接（有效期数小时），平台没有关闭该鉴权的开关。要长期公开访问，请在 EdgeOne 控制台「域名管理」绑定自定义域名（加速区域含中国大陆时需完成 ICP 备案）。因此**建议先用上面两个 Cloudflare 链接测试**。
+
 ---
 
 ## 快速配置（环境变量）
@@ -158,14 +170,14 @@ edgeone makers deploy -n geogebra-webchat --skip-ai-gateway-sync
 
 ### 第 3 步：打开即用
 
-浏览器打开网址，直接输入数学题或上传题目图片；右上角可临时覆盖模型名与接口地址。
+浏览器打开部署命令输出的**完整链接**（含 `eo_token`），直接输入数学题或上传题目图片；右上角可临时覆盖模型名与接口地址。裸预览域名会返回 401，长期公开访问请绑定自定义域名，见「在线体验」。
 
 ## 部署到 Cloudflare Pages
 
-本项目在 Cloudflare Pages 上还有一份部署，与 EdgeOne 站点并存、互不影响：
+本项目在 Cloudflare Pages 上还有一份部署，与 EdgeOne 站点并存、互不影响。两个入口都列在顶部「在线体验」：
 
 - 默认访问：https://geogebra-webchat.pages.dev/
-- 自定义域：`geogebra-webchat.348349.xyz`（需按第 4 步补 CNAME 后生效）
+- 自定义域：https://geogebra-webchat.348349.xyz/（需按第 4 步补 CNAME 后生效）
 
 **前端零改动**：`/llm-proxy` 是同源相对路径，GeoGebra 静态资源也是同源 `/geogebra/...`，服务端 Key 与默认模型通过 `GET /llm-proxy` 下发，都是平台无关的。唯一要适配的是请求体，已由 `functions/llm-proxy.ts` 处理。
 
