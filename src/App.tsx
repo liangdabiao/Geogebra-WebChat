@@ -1,4 +1,4 @@
-import { createSignal, onMount, For, Show, createEffect } from "solid-js";
+import { createSignal, onMount, onCleanup, For, Show, createEffect } from "solid-js";
 import { marked } from "marked";
 import { mountGeoGebra, type GeoGebraController } from "./geogebra";
 import { runChat, buildUserContent, stripImageParts } from "./ai-client";
@@ -30,14 +30,32 @@ function preprocessMarkdown(text: string): string {
   });
 }
 
+/**
+ * KaTeX 默认输出 htmlAndMathml 两份：MathML 层被 CSS 裁成 1px「视觉隐藏」，
+ * 但仍然参与浏览器的文本选择与复制，于是复制出来的公式会变成
+ * 「2 2」「B D E BDE」「x = A E x=AE」这类重复且被拆成单字符的文本。
+ * 只输出 HTML 一份即可消除重复；需要规范 LaTeX 文本时用消息上的「复制原文」。
+ */
 function renderMath(text: string): string {
-  // 在 marked.parse() 之前处理：把 raw markdown 中的 $...$ 和 $$...$$
-  // 渲染为 KaTeX HTML，这样 marked 不会碰到 < > & 等字符
-  text = text.replace(/\$\$(.+?)\$\$/gs, (_, code) =>
-    katex.renderToString(code, { displayMode: true, throwOnError: false })
-  );
-  text = text.replace(/(?<!\$)\$(.+?)\$(?!\$)/g, (_, code) =>
-    katex.renderToString(code, { displayMode: false, throwOnError: false })
+  const render = (code: string, displayMode: boolean): string | null => {
+    try {
+      return katex.renderToString(code.trim(), {
+        displayMode,
+        throwOnError: false,
+        strict: "ignore",
+        output: "html",
+      });
+    } catch {
+      return null;
+    }
+  };
+  // 在 marked.parse() 之前把公式换成 KaTeX HTML，避免 marked 碰到 < > & 等字符
+  // 块级 $$...$$（允许跨行）
+  text = text.replace(/\$\$([\s\S]+?)\$\$/g, (m, code: string) => render(code, true) ?? m);
+  // 行内 $...$：允许同段内换行，但禁止跨空行并限制长度，
+  // 防止流式输出时一个尚未闭合的 $ 把后面整段正文吞进公式。
+  text = text.replace(/(?<!\$)\$([\s\S]{1,400}?)\$(?!\$)/g, (m, code: string) =>
+    code.includes("\n\n") ? m : (render(code, false) ?? m)
   );
   return text;
 }
@@ -49,7 +67,16 @@ interface UiMessage {
   activity: string[];
   /** 用户消息里附带的图片预览（data URL）。 */
   images?: string[];
+  /** 该助手消息仍在生成中，用于显示等待提示。 */
+  pending?: boolean;
 }
+
+type WaitPhase = "reading" | "drawing" | "writing";
+const WAIT_TEXT: Record<WaitPhase, string> = {
+  reading: "正在读题、分析图形关系…",
+  drawing: "正在生成并执行 GeoGebra 作图命令…",
+  writing: "正在生成解答文字…",
+};
 
 type ExportKind = "ggb" | "tikz" | "png" | "svg";
 
@@ -129,6 +156,20 @@ export default function App() {
       : DEFAULT_SPLIT,
   );
   const [resizing, setResizing] = createSignal(false);
+  // 生成耗时较长（读图 + 多步工具循环），用阶段文案和计时明确告诉用户「正在处理」
+  const [waitPhase, setWaitPhase] = createSignal<WaitPhase>("reading");
+  const [waited, setWaited] = createSignal(0);
+
+  createEffect(() => {
+    if (!running()) return;
+    const startedAt = Date.now();
+    setWaited(0);
+    const timer = window.setInterval(
+      () => setWaited(Math.floor((Date.now() - startedAt) / 1000)),
+      1000
+    );
+    onCleanup(() => window.clearInterval(timer));
+  });
 
   let ggb: GeoGebraController | null = null;
   let mainRef: HTMLElement | undefined;
@@ -141,6 +182,12 @@ export default function App() {
     setHint(text);
     if (hintTimer) clearTimeout(hintTimer);
     hintTimer = window.setTimeout(() => setHint(""), 5000);
+  }
+
+  /** 复制未经 KaTeX 渲染的 Markdown 原文，公式保持规范的 $...$ 形式。 */
+  async function copyAnswer(text: string) {
+    const ok = await copyText(text);
+    showHint(ok ? "已复制 Markdown 原文（公式保持 $...$ 形式）" : "复制失败，请手动选择文本");
   }
 
   createEffect(() => {
@@ -456,7 +503,7 @@ export default function App() {
       activity: [],
     };
     const aId = nextId();
-    const assistantMsg: UiMessage = { id: aId, role: "assistant", content: "", activity: [] };
+    const assistantMsg: UiMessage = { id: aId, role: "assistant", content: "", activity: [], pending: true };
     setMessages((p) => [...p, userMsg, assistantMsg]);
 
     // 历史里剥掉旧图片，只在本轮携带；工具循环后续 step 由 prepareStep 再剥一次
@@ -467,6 +514,7 @@ export default function App() {
     setModelMessages(core);
     setInput("");
     setPendingImages([]);
+    setWaitPhase("reading");
     setRunning(true);
 
     let acc = "";
@@ -481,8 +529,10 @@ export default function App() {
       for await (const part of result.fullStream) {
         if (part.type === "text-delta" && part.text) {
           acc += part.text;
+          if (waitPhase() !== "writing") setWaitPhase("writing");
           patchMessage(aId, (m) => ({ ...m, content: acc }));
         } else if (part.type === "tool-call") {
+          setWaitPhase("drawing");
           patchMessage(aId, (m) => ({
             ...m,
             activity: [...m.activity, `调用工具 ${part.toolName}`],
@@ -498,7 +548,7 @@ export default function App() {
         }
       }
       if (!acc.trim()) acc = "(已完成作图)";
-      patchMessage(aId, (m) => ({ ...m, content: acc }));
+      patchMessage(aId, (m) => ({ ...m, content: acc, pending: false }));
       setModelMessages([...core, { role: "assistant", content: acc }]);
     } catch (e) {
       const msg = friendlyError((e as Error).message ?? String(e));
@@ -506,6 +556,7 @@ export default function App() {
         ...m,
         content: m.content || `出错：${msg}`,
         activity: [...m.activity, `⚠ ${msg}`],
+        pending: false,
       }));
     } finally {
       setRunning(false);
@@ -624,6 +675,24 @@ export default function App() {
                     <Show when={m.content}>
                       <div class="markdown" innerHTML={marked.parse(renderMath(preprocessMarkdown(m.content))) as string} />
                     </Show>
+                    <Show when={m.pending}>
+                      <div class="waiting" role="status" aria-live="polite">
+                        <span class="waiting-dots" aria-hidden="true"><i /><i /><i /></span>
+                        <span class="waiting-label">{WAIT_TEXT[waitPhase()]}</span>
+                        <span class="waiting-time">已等待 {waited()} 秒</span>
+                        <div class="waiting-note">读图与分步作图通常需要 10–60 秒，请稍候，无需重复发送</div>
+                      </div>
+                    </Show>
+                    <Show when={m.role === "assistant" && !!m.content && !m.pending}>
+                      <button
+                        type="button"
+                        class="copy-raw"
+                        onClick={() => copyAnswer(m.content)}
+                        title="复制 Markdown 原文（公式保持 $...$ 形式）"
+                      >
+                        复制原文
+                      </button>
+                    </Show>
                   </div>
                 )}
               </For>
@@ -636,6 +705,12 @@ export default function App() {
             onDragLeave={() => setDragOver(false)}
             onDrop={onComposerDrop}
           >
+            <Show when={running()}>
+              <div class="composer-wait" role="status" aria-live="polite">
+                <span class="waiting-dots" aria-hidden="true"><i /><i /><i /></span>
+                {WAIT_TEXT[waitPhase()]} · 已等待 {waited()} 秒
+              </div>
+            </Show>
             <Show when={pendingImages().length > 0}>
               <div class="image-strip">
                 <For each={pendingImages()}>
@@ -660,7 +735,7 @@ export default function App() {
                 ＋ 图片
               </button>
               <textarea
-                placeholder="描述要画的图，或直接粘贴 / 拖入题目图片…（Enter 发送，Shift+Enter 换行）"
+                placeholder={running() ? "助手正在处理，请稍候…" : "描述要画的图，或直接粘贴 / 拖入题目图片…（Enter 发送，Shift+Enter 换行）"}
                 value={input()}
                 onInput={(e) => setInput(e.currentTarget.value)}
                 onKeyPress={onKey}

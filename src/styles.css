@@ -366,6 +366,91 @@ body.is-resizing * {
   padding: 1px 6px;
 }
 
+/* 生成中的等待提示：读图 + 多步作图耗时较长，明确显示阶段与计时 */
+.waiting {
+  margin: 6px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid #dbe4ff;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.waiting-label {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.waiting-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.waiting-note {
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.waiting-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.waiting-dots i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: waiting-bounce 1.2s infinite ease-in-out;
+}
+
+.waiting-dots i:nth-child(2) { animation-delay: 0.15s; }
+.waiting-dots i:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes waiting-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .waiting-dots i { animation: none; opacity: 1; }
+}
+
+.composer-wait {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+}
+
+/* 复制未渲染的 Markdown 原文，避免 KaTeX 排版字符被复制成碎片 */
+.copy-raw {
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--muted);
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.copy-raw:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 /* 输入区 */
 .composer {
   border-top: 1px solid var(--border);

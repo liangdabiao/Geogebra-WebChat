@@ -57,11 +57,31 @@ export function fileToBase64(file: File): Promise<string> {
 }
 
 export async function copyText(text: string): Promise<boolean> {
+  // 优先用异步剪贴板 API；iframe、无用户手势、部分浏览器会拒绝，
+  // 这时退回临时 textarea + execCommand，保证「复制原文 / 复制 TikZ」始终可用。
   try {
-    await navigator.clipboard.writeText(text);
-    return true;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* 走降级 */
+  }
+  let ta: HTMLTextAreaElement | undefined;
+  try {
+    ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    return document.execCommand("copy");
   } catch {
     return false;
+  } finally {
+    ta?.remove();
   }
 }
 
