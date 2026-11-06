@@ -242,8 +242,34 @@ export async function onRequest(context: any) {
     );
   }
 
-  const resHeaders = new Headers(upstream.headers);
-  const res = new Response(upstream.body, { status: upstream.status, headers: resHeaders });
+  // 只透传必要响应头。上游的 transfer-encoding / content-length / connection 等
+  // hop-by-hop 头若原样带回，EdgeOne Cloud Functions 线上运行时会返回 200 但 body 为空
+  // （本地 makers dev 不受影响，所以很容易漏掉）。
+  const resHeaders = new Headers();
+  for (const name of ["content-type", "cache-control", "x-request-id"]) {
+    const v = upstream.headers.get(name);
+    if (v) resHeaders.set(name, v);
+  }
+  if (!resHeaders.has("cache-control")) resHeaders.set("cache-control", "no-store");
+
+  // 再把上游 body 包一层惰性 ReadableStream：部分运行时不接受直接把 fetch 的
+  // ReadableStream 作为响应体，由平台按需 pull 更稳妥，同时保留 SSE 流式输出。
+  let responseBody: BodyInit | null = null;
+  if (upstream.body) {
+    const reader = upstream.body.getReader();
+    responseBody = new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    });
+  }
+
+  const res = new Response(responseBody, { status: upstream.status, headers: resHeaders });
   applyCors(res, corsOrigin);
   return res;
 }

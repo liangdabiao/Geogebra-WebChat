@@ -12,7 +12,7 @@ Geogebra Webchat — AI 驱动的数学几何画板。用户输入自然语言�
 
 - **前端**：SolidJS + Vite（`src/`），构建产物为 `dist/` 静态文件
   - `src/ai-client.ts` — 核心浏览器内 AI 工具循环：Vercel AI SDK `streamText` + `executeGeoGebraCommands` 工具；所有 LLM 请求经 `proxyFetch` 改写到 `/llm-proxy`（带 `x-target-url` 头）
-  - `src/geogebra.ts` — GeoGebra CDN 加载 + 画板控制（evalCommand、XML 快照恢复）
+  - `src/geogebra.ts` — 本地 vendor 的 GeoGebra 5.0（`public/geogebra/HTML5/5.0/web3d/`）加载 + 画板控制（evalCommand、XML 快照恢复、导出 API）
   - `src/lib/normalize.ts` — 中文命令别名 → GeoGebra 英文命令规范化
   - `src/lib/export.ts` — 下载工具、TikZ 文本规整、基于对象快照的 TikZ 降级生成器
   - `src/lib/image.ts` — 上传图片缩放 / JPEG 重编码，产出纯 base64
@@ -23,14 +23,19 @@ Geogebra Webchat — AI 驱动的数学几何画板。用户输入自然语言�
 
 ## 环境变量
 
-- `MAKERS_MODELS_KEY` — EdgeOne Makers 网关 Key（写在 `.env`，部署时同步；`.env` 不入库）。
-  它是默认且首选的模型来源；只有它为空时才回退旧的 `MODEL_API_KEY`（第三方配置）。
-- 模型来源默认走 EdgeOne 内置网关：`https://ai-gateway.edgeone.link/v1` +
-  `@makers/deepseek-v4-flash`（内置模型有免费额度，无需绑定厂商密钥）。
-  两个值都是 `cloud-functions/llm-proxy/index.ts` 里的 `DEFAULT_*` 常量。
-- **Key 与端点必须成组切换**：配了 `MAKERS_MODELS_KEY` 就整组走 EdgeOne 网关并忽略
-  `MODEL_BASE_URL` / `MODEL_NAME` / `MODEL_API_KEY`；否则会「拿 A 的 Key 打 B 的网关」→ 401。
-  换内置模型用 `MAKERS_MODEL`（目前内置只有 `@makers/deepseek-v4-flash`）。
+**两组二选一，不要同时填**（写在 `.env`，`.env` 不入库）：
+
+- **A 组 · 自有厂商（当前默认）**：`MODEL_BASE_URL=https://api.deepseek.com/v1`、
+  `MODEL_NAME=deepseek-flash`（自带视觉输入，可图片读题）、`MODEL_API_KEY`。
+  Key 由云函数服务端注入，不进浏览器。
+- **B 组 · EdgeOne 内置网关**：只填 `MAKERS_MODELS_KEY`，默认走
+  `https://ai-gateway.edgeone.link/v1` + `@makers/deepseek-v4-flash`（免费额度 50 万 token/月，按账号共享）。
+  两个默认值是 `cloud-functions/llm-proxy/index.ts` 里的 `DEFAULT_*` 常量。
+
+- **Key 与端点必须成组切换**：配了 `MAKERS_MODELS_KEY` 就整组走 EdgeOne 网关并忽略 `MODEL_*`；
+  反之不能只改端点不改 Key，否则「拿 A 的 Key 打 B 的网关」→ 401。
+- 线上变量用 `edgeone makers env set KEY VALUE -e production` 写入；部署加
+  `--skip-ai-gateway-sync`，防止 CLI 自动注入网关 Key 覆盖自有配置。
 
 ## 本地开发与部署
 
@@ -49,3 +54,6 @@ edgeone makers deploy -n geogebra-webchat   # 部署到 EdgeOne
 5. 效果截图与参考文档在 `doc/` 目录
 6. 导出走 `src/lib/export.ts` + `src/geogebra.ts` 接出的 API：`.ggb` 用 `getBase64()`、「打开 .ggb」用 `setBase64()`、TikZ 用未公开的 `exportPGF(cb)`（**必须保留三档降级**：原生导出 → 基于对象快照的生成器 → 导出 SVG）
 7. 图片统一经 `src/lib/image.ts` 压缩后才发给模型；`/llm-proxy` 有 5.5MB 请求体保护，图片只在工具循环首步携带（`prepareStep`），历史轮自动剥离
+8. 云函数成功响应**不要**退回 `new Headers(upstream.headers)` + `new Response(upstream.body)`：实测 EdgeOne 线上返回 200 但 body 为空，本地 `makers dev` 却正常。必须只透传 `content-type` / `cache-control` 等安全头（剔除 `transfer-encoding` / `content-length` / `connection`），并用惰性 `ReadableStream` 包一层上游 body，SSE 才不丢
+9. 前端判断「是否仍在使用服务端注入的 Key」要对比云函数 GET 下发的 `baseURL` host（`usesServerEndpoint`），不要硬编码 `ai-gateway.edgeone.link`；换默认服务商时同步升级 `LS_*` 前缀，让老访客 localStorage 里的旧端点 / 模型名失效
+10. 云函数里别再用 `body` 声明新变量（转发请求体已有 `let body`）——CLI 的 Babel 构建会直接报 `Identifier 'body' has already been declared` 并导致部署失败
