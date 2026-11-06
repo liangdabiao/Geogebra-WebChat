@@ -63,6 +63,12 @@ const LS_KEY = "geochat-web-v3-key";
 const LS_MODEL = "geochat-web-v3-model";
 const LS_BASE_URL = "geochat-web-v3-base-url";
 
+// 左右分栏：默认 58%（对应原来的 1.4fr : 1fr），可拖动并记住用户选择
+const LS_SPLIT = "geochat-web-v3-split";
+const DEFAULT_SPLIT = 58;
+const MIN_SPLIT = 25;
+const MAX_SPLIT = 78;
+
 // 402 额度/余额不足的统一提示：Makers 免费额度按账号共享（50 万 token/月），换 Key 不会重置。
 const QUOTA_HELP =
   "模型服务返回额度或余额不足（402）。\n" +
@@ -115,8 +121,17 @@ export default function App() {
   const [busy, setBusy] = createSignal("");
   const [dragOver, setDragOver] = createSignal(false);
   const [lastTikZ, setLastTikZ] = createSignal("");
+  // 画板占主区的百分比；读回时做范围校验，避免旧缓存把某一栏挤没
+  const savedSplit = Number(localStorage.getItem(LS_SPLIT));
+  const [splitPct, setSplitPct] = createSignal<number>(
+    Number.isFinite(savedSplit) && savedSplit >= MIN_SPLIT && savedSplit <= MAX_SPLIT
+      ? savedSplit
+      : DEFAULT_SPLIT,
+  );
+  const [resizing, setResizing] = createSignal(false);
 
   let ggb: GeoGebraController | null = null;
+  let mainRef: HTMLElement | undefined;
   let scrollRef: HTMLDivElement | undefined;
   let imageInputRef: HTMLInputElement | undefined;
   let ggbFileRef: HTMLInputElement | undefined;
@@ -126,6 +141,73 @@ export default function App() {
     setHint(text);
     if (hintTimer) clearTimeout(hintTimer);
     hintTimer = window.setTimeout(() => setHint(""), 5000);
+  }
+
+  createEffect(() => {
+    mainRef?.style.setProperty("--split", `${splitPct()}%`);
+  });
+
+  function persistSplit(pct: number) {
+    localStorage.setItem(LS_SPLIT, pct.toFixed(1));
+  }
+
+  let lastSplitPointerDown = 0;
+
+  /** 拖动分隔条：全屏遮罩接管指针，避免 GeoGebra 的 iframe/canvas 截走 move 事件。 */
+  function startResize(e: PointerEvent) {
+    // 不调用 preventDefault：它会抑制浏览器生成 dblclick。
+    // 防选中/防滚动由 body.is-resizing 与 touch-action:none 承担。
+    // 双击重置在这里自己判断，同时也保留 onDblClick 作为兜底。
+    const now = Date.now();
+    if (now - lastSplitPointerDown < 350) {
+      lastSplitPointerDown = 0;
+      resetSplit();
+      return;
+    }
+    lastSplitPointerDown = now;
+    if (!mainRef) return;
+    const rect = mainRef.getBoundingClientRect();
+    if (rect.width < 1) return;
+    setResizing(true);
+    document.body.classList.add("is-resizing");
+
+    const onMove = (ev: PointerEvent) => {
+      const pct = ((ev.clientX - rect.left) / rect.width) * 100;
+      setSplitPct(Math.min(MAX_SPLIT, Math.max(MIN_SPLIT, pct)));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      document.body.classList.remove("is-resizing");
+      setResizing(false);
+      persistSplit(splitPct());
+      // ResizeObserver 已同步过尺寸，结束时再强制对齐一次
+      ggb?.resize();
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
+
+  function resetSplit() {
+    setSplitPct(DEFAULT_SPLIT);
+    persistSplit(DEFAULT_SPLIT);
+    ggb?.resize();
+  }
+
+  function onSplitKeyDown(e: KeyboardEvent) {
+    const step = e.shiftKey ? 5 : 2;
+    const current = splitPct();
+    let next: number | null = null;
+    if (e.key === "ArrowLeft") next = Math.max(MIN_SPLIT, current - step);
+    else if (e.key === "ArrowRight") next = Math.min(MAX_SPLIT, current + step);
+    else if (e.key === "Enter" || e.key === "Home") next = DEFAULT_SPLIT;
+    if (next === null) return;
+    e.preventDefault();
+    setSplitPct(next);
+    persistSplit(next);
+    ggb?.resize();
   }
 
   // 服务端配置探测：云函数返回默认接口地址/模型名，并告知 Key 是否已服务端注入
@@ -464,7 +546,7 @@ export default function App() {
         </div>
       </header>
 
-      <main class="main">
+      <main class="main" ref={mainRef}>
         <section class="canvas-pane">
           <div class="canvas-toolbar">
             <span class="canvas-status" title={ggbStatus()}>{ggbStatus()}</span>
@@ -501,6 +583,23 @@ export default function App() {
           />
           <div id="ggb-container" class="ggb-container" />
         </section>
+
+        <div
+          class={`splitter ${resizing() ? "active" : ""}`}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="左右拖动调整画板与聊天区宽度；双击或按 Enter 恢复默认，方向键微调"
+          aria-valuemin={MIN_SPLIT}
+          aria-valuemax={MAX_SPLIT}
+          aria-valuenow={Math.round(splitPct())}
+          tabindex={0}
+          title="左右拖动调整宽度 · 双击恢复默认"
+          onPointerDown={startResize}
+          onDblClick={resetSplit}
+          onKeyDown={onSplitKeyDown}
+        >
+          <span class="splitter-grip" aria-hidden="true">⋮</span>
+        </div>
 
         <section class="chat-pane">
           <div class="messages" ref={scrollRef}>
@@ -587,6 +686,10 @@ export default function App() {
           </div>
         </section>
       </main>
+
+      <Show when={resizing()}>
+        <div class="resize-mask" />
+      </Show>
     </div>
   );
 }

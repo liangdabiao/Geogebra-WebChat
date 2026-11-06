@@ -9,6 +9,8 @@
  * 因此所有调用都做能力检测 + 超时 + 由上层降级处理，不能假定一定可用。
  */
 
+import { appendZipEntry, base64ToBytes, bytesToBase64, isZipBytes } from "./lib/ggb";
+
 declare global {
   interface Window {
     GGBApplet?: any;
@@ -76,6 +78,8 @@ export interface GeoGebraController {
   getVersion: () => string;
   capabilities: () => ExportCapabilities;
   inspectObjects: () => GgbObjectInfo[];
+  /** 按容器当前尺寸强制重设 applet 画布（窗口缩放 / 分栏拖动后调用）。 */
+  resize: () => void;
 }
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
@@ -241,6 +245,39 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
 
   await ready;
 
+  // GeoGebra 注入时按容器「当时」的像素宽高创建 canvas，之后不会自动跟随容器。
+  // 窗口缩放、顶栏/导出按钮折行、提示条出现或左右分栏拖动都会改变容器尺寸，
+  // 旧 canvas 保持不变就会溢出并盖住聊天区。这里把 applet 尺寸与容器实时同步。
+  let lastW = width;
+  let lastH = height;
+  let syncing = false;
+  const syncSize = (w: number, h: number, force = false) => {
+    if (syncing || w < 1 || h < 1) return;
+    if (!force && w === lastW && h === lastH) return;
+    syncing = true;
+    lastW = w;
+    lastH = h;
+    try {
+      // setSize 会顺手给容器写 inline 宽高，但 CSS 里 .ggb-container 的
+      // width:100% !important 会压住它，容器始终等于面板宽度；
+      // 这里只借用 setSize 让 GeoGebra 内部视图按新尺寸重算。
+      container.style.removeProperty("width");
+      container.style.removeProperty("height");
+      if (typeof api?.setSize === "function") api.setSize(w, h);
+      else if (typeof api?.recalculateEnvironments === "function") api.recalculateEnvironments();
+      window.dispatchEvent(new Event("resize"));
+    } catch {
+      /* ignore */
+    } finally {
+      syncing = false;
+    }
+  };
+  const onContainerResize = () => syncSize(container.clientWidth, container.clientHeight);
+  if (typeof ResizeObserver !== "undefined") {
+    new ResizeObserver(onContainerResize).observe(container);
+  }
+  window.addEventListener("resize", onContainerResize);
+
   const has = (name: string) => typeof api?.[name] === "function";
   const getVersion = () => (has("getVersion") ? safeString(() => api.getVersion()) : "unknown");
 
@@ -325,16 +362,40 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
       await ready;
       if (!has("getBase64")) throw new Error("画板不支持 .ggb 导出（缺少 getBase64）");
       // 5.0 构建：无参或 (_, false) 会同步返回打包好的 base64 .ggb
+      let raw = "";
       for (const attempt of [() => api.getBase64(), () => api.getBase64(null, false)]) {
         try {
           const r = attempt();
-          if (typeof r === "string" && r.length > 8) return stripDataUrl(r);
+          if (typeof r === "string" && r.length > 8) {
+            raw = stripDataUrl(r);
+            break;
+          }
         } catch {
           /* 继续尝试下一种调用方式 */
         }
       }
       // 其他版本可能只提供 callback 形式
-      return stripDataUrl(await callStringApi(api, "getBase64", 12_000));
+      if (!raw) raw = stripDataUrl(await callStringApi(api, "getBase64", 12_000));
+
+      const bytes = base64ToBytes(raw);
+      // 明确拦截非 ZIP 产物，避免静默写出一个桌面软件必然打不开的坏文件
+      if (!isZipBytes(bytes)) {
+        throw new Error("GeoGebra 返回的不是有效的 .ggb（缺少 ZIP 文件头），请重试或改用 PNG / SVG 导出");
+      }
+      // 网页 applet 的 getBase64() 不带 geogebra_thumbnail.png，而桌面版保存的 .ggb 都带。
+      // 补上缩略图以提升桌面软件兼容性；任何异常都原样返回引擎产物，不影响导出。
+      if (has("getThumbnailBase64")) {
+        const thumb = safeString(() => api.getThumbnailBase64());
+        if (thumb) {
+          try {
+            const merged = appendZipEntry(bytes.buffer as ArrayBuffer, "geogebra_thumbnail.png", base64ToBytes(thumb));
+            return bytesToBase64(new Uint8Array(merged));
+          } catch {
+            /* 回退到原始文件 */
+          }
+        }
+      }
+      return raw;
     },
     openGgbBase64: async (base64) => {
       await ready;
@@ -379,5 +440,6 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
       version: getVersion(),
     }),
     inspectObjects,
+    resize: () => syncSize(container.clientWidth, container.clientHeight, true),
   };
 }

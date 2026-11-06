@@ -83,22 +83,88 @@ body {
   width: 280px;
 }
 
-/* 主区 */
+/* 主区：左画板 / 可拖拽分隔条 / 右聊天，比例由 --split 控制 */
 .main {
   flex: 1;
   display: grid;
-  grid-template-columns: 1.4fr 1fr;
+  grid-template-columns: minmax(0, var(--split, 58%)) 10px minmax(0, 1fr);
   gap: 0;
   min-height: 0;
+}
+
+/* 分隔条：可见把手 + 加宽的命中区，避免 GeoGebra 的 canvas/iframe 吞掉拖动事件 */
+.splitter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #eef1f5;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+  z-index: 5;
+}
+
+.splitter::before {
+  content: "";
+  position: absolute;
+  inset: 0 -5px;
+}
+
+/* 常驻可见的把手，避免用户「找不到可以左右拉动的地方」 */
+.splitter-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 46px;
+  border-radius: 7px;
+  background: var(--panel);
+  border: 1px solid #cbd2dc;
+  color: #7c8698;
+  font-size: 15px;
+  line-height: 1;
+  box-shadow: 0 1px 3px rgba(31, 35, 41, 0.1);
+  pointer-events: none;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.splitter:hover .splitter-grip,
+.splitter:focus-visible .splitter-grip,
+.splitter.active .splitter-grip {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.splitter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* 拖动时盖住整个页面，确保指针事件不会被画板的 iframe/canvas 截走 */
+.resize-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  cursor: col-resize;
+  background: transparent;
+}
+
+body.is-resizing,
+body.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .canvas-pane {
   position: relative;
   background: var(--panel);
-  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
 }
 
 /* 画板工具栏 */
@@ -160,6 +226,21 @@ body {
 .ggb-container {
   flex: 1;
   min-height: 0;
+  /* GeoGebra 内部的 .applet_scaler 带固定像素 inline 宽高，会把容器撑宽，
+     进而让 applet 一直按旧的大尺寸重算，形成「容器不缩 → 画板不缩」的死循环。
+     锁死宽度 + min-width:0 让容器始终等于面板宽度。 */
+  /* GeoGebra 的 resize handler 会往容器写 inline width:NNNpx，且晚于我们的清理，
+     必须用 !important 压住，否则它读 clientWidth 永远拿到上一次的旧宽度。 */
+  width: 100% !important;
+  min-width: 0;
+  position: relative;
+  /* 兜底：即使 applet 内部仍是旧像素尺寸，也绝不溢出到聊天区 */
+  overflow: hidden;
+}
+
+.ggb-container > * {
+  max-width: 100%;
+  max-height: 100%;
 }
 
 /* 聊天区 */
@@ -167,6 +248,8 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
+  overflow: hidden;
   background: var(--bg);
 }
 
@@ -240,6 +323,13 @@ body {
   padding: 10px;
   border-radius: 8px;
   overflow-x: auto;
+}
+
+/* 分栏变窄后，长公式自己横向滚动，不把聊天栏撑破 */
+.markdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 /* 用户消息里的图片 */
@@ -392,9 +482,13 @@ body {
 }
 
 @media (max-width: 900px) {
+  /* 窄屏改为上下分栏，左右拖动手柄不再适用 */
   .main {
     grid-template-columns: 1fr;
     grid-template-rows: 1fr 1fr;
+  }
+  .splitter {
+    display: none;
   }
   .canvas-status {
     max-width: 100%;

@@ -66,6 +66,7 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 - **多格式导出**：一键导出 `.ggb`、PGF/TikZ `.tex`、PNG、SVG，并可复制 `tikzpicture` 片段
 - **打开 .ggb**：载入已有构造继续编辑
 - **图片读题**：输入框支持上传 / 粘贴 / 拖入图片，模型读图后生成 GeoGebra 命令并作图
+- **可拖拽分栏**：左右画板与聊天区之间有一条分隔条，可自由拖动调整宽度，比例自动记忆
 
 ---
 
@@ -73,10 +74,29 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 
 画板上方工具栏提供 `.ggb`、TikZ、PNG、SVG 导出与「打开 .ggb」。
 
-- `.ggb` 走 GeoGebra 的 `getBase64()`，得到标准二进制构造文件，可被桌面版直接打开；「打开 .ggb」用 `setBase64()` 回载。
+- `.ggb` 走 GeoGebra 的 `getBase64()`，得到标准二进制构造文件；「打开 .ggb」用 `setBase64()` 回载。导出时先校验 ZIP 文件头，再补上桌面版常见的 `geogebra_thumbnail.png`（网页 applet 的 `getBase64()` 产物默认不带缩略图），以提高 GeoGebra 桌面软件的兼容性；补图失败会自动回退引擎原始产物，不会让导出失败。
 - TikZ 优先调用本地 GeoGebra 5.0 构建里的 `exportPGF(callback)`（该 API 未列入官方文档）；若超时或失败，自动降级到基于对象快照的自研生成器，最后再降级为导出 SVG。产物是可编译的完整 `.tex`，「复制 TikZ」给的是 `tikzpicture` 片段。PGF/TikZ 只覆盖 2D 图形视图。
 - 图片上传后统一缩放到长边 ≤1280px 并转 JPEG，控制在几百 KB，最多 4 张。这是为了适应 EdgeOne Cloud Functions 6MB 请求体上限；图片只在工具循环首步发送，历史轮自动剥离，避免 6 步循环重复传图。
 - 图片以 base64 嵌在 OpenAI 兼容的 `image_url` 里经 `/llm-proxy` 转发，因此**所用模型需要支持图片输入**。
+
+---
+
+## 界面布局（分栏拖动与画板自适应）
+
+左侧 GeoGebra 画板与右侧聊天区之间有一条带把手的**分隔条**：
+
+- **左右拖动**即可改变两侧宽度，范围 25%～78%，比例写入 `localStorage`（`geochat-web-v3-split`），刷新后保留。
+- **双击分隔条**或聚焦后按 `Enter` 恢复默认 58%；`←` / `→` 每次微调 2%（按住 Shift 为 5%）。
+- 拖动时会盖一层临时遮罩，避免 GeoGebra 内部的 canvas / iframe 截走指针事件。
+- 窄屏（≤900px）自动改为上下布局，分隔条隐藏。
+
+画板尺寸通过 `ResizeObserver` 与容器实时同步：清理 GeoGebra 写入的 inline 尺寸 → 调用 `applet.setSize()` 重算内部视图 → 派发 `resize` 事件。容器宽度用 `width: 100% !important` 锁死为面板宽度（GeoGebra 的 resize handler 会往容器写回旧像素宽度，不锁住会形成「容器不缩 → 画板不缩」的死循环），再加 `overflow: hidden` 兜底。
+
+因此窗口缩放、顶栏/导出按钮折行、提示条出现或分栏拖动时，GeoGebra 的 canvas 都会跟着重算，**不会再溢出盖住聊天区**。聊天区里的长 KaTeX 公式则改为自身横向滚动，不撑破窄栏。
+
+> 如果桌面版仍提示打不开：优先升级到最新版 GeoGebra Classic，并改用软件内「菜单 → 打开 → 从本机选择」而不是双击文件（部分沙盒版桌面应用双击会报 Cannot open file）；也可以在网页版 `geogebra.org/classic` 里打开同一文件交叉验证。
+
+> 3D 视图里斜着的白色四边形是坐标系的 xy 平面，是视角旋转后的正常显示，不是布局溢出；想看全可用画板自带的全屏按钮，或把分栏往右拖宽一些。
 
 ---
 
@@ -116,6 +136,7 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 │   └── lib/
 │       ├── normalize.ts     # 命令规范化（中文别名→英文）
 │       ├── export.ts        # .ggb / TikZ / SVG / PNG 导出与 TikZ 降级生成
+│       ├── ggb.ts           # .ggb ZIP 缩略图补全与文件头校验
 │       └── image.ts         # 图片压缩与 base64 产出
 ├── cloud-functions/
 │   └── llm-proxy/           # 通用 LLM 请求代理（两个平台共用）
@@ -337,6 +358,12 @@ EdgeOne 运行时可能把 `context.request` 直接给成标准 `Request`，其 
 - 删除 `index.html` 里的 `cdn.jsdelivr.net` KaTeX `<link>`，改由 `src/main.tsx` 导入 `katex/dist/katex.min.css`；Vite 打包 CSS 与字体，首屏不再请求外部 CDN，样式也与本地 `katex` JS 版本一致
 - README 列出三个在线体验地址；EdgeOne 使用已绑定的自定义域 `geogebra-webchat.liangdabiao.com`，`*.edgeone.cool` 仅为临时预览链接
 - 云函数请求体读取兼容「标准 `Request` 流式 body」的新版 EdgeOne 运行时，修复线上 POST 返回 422 `missing field messages`
+
+### 2026-11 · 分栏拖动、画板自适应与 .ggb 桌面兼容
+
+- 左右面板改为可拖拽三列布局，新增常驻可见的把手；支持双击 / Enter / Home 重置、`←` `→` 微调、比例持久化，拖动时用全屏遮罩避免 GeoGebra 的 canvas / iframe 截走指针事件
+- 修复「画板突然溢出」：GeoGebra 注入时固定了 canvas 像素尺寸，窗口缩放、工具栏折行或分栏拖动后不会跟随，旧 canvas 会盖住聊天区。现用 `ResizeObserver` + `setSize` 实时同步，并用 CSS 锁住容器宽度防止 GeoGebra 写回旧尺寸
+- `.ggb` 导出新增 ZIP 头校验与 `geogebra_thumbnail.png` 缩略图补全（`src/lib/ggb.ts`，纯字节追加、不解压原条目、失败自动回退），提升桌面软件兼容性；实测产物 ZIP/CRC 全部有效，且能被 GeoGebra 引擎完整回载
 
 ## 更多文档
 
