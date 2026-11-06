@@ -17,6 +17,7 @@
 | `MODEL_API_KEY` | 是 | 厂商 Key，仅由云函数服务端注入，不暴露给浏览器 |
 
 也可以改用 EdgeOne Makers 内置网关（只填 `MAKERS_MODELS_KEY`），两组二选一，详见「环境变量」与「部署到 EdgeOne」。
+Cloudflare Pages 用的是同一组变量，只是写入命令换成 `npx wrangler pages secret bulk .env --project-name <项目名>`，见「部署到 Cloudflare Pages」。
 
 ---
 
@@ -88,8 +89,8 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 - **前端**：SolidJS + Vite，`marked` 渲染 Markdown，KaTeX 渲染公式
 - **AI**：Vercel `ai` SDK v6，浏览器内 `streamText({ stopWhen: stepCountIs(6) })` 跑工具调用循环
 - **GeoGebra**：仓库自带 GeoGebra 5.0 web3d 静态资源（`public/geogebra/HTML5/5.0/web3d/`），由 `deployggb.js` 加载。导出 `.ggb` / PGF-TikZ / PNG / SVG 依赖该本地构建提供的 applet API，因此不能换回 CDN 版本
-- **后端**：EdgeOne 云函数 `cloud-functions/llm-proxy`，透明转发 + 解决 CORS + 服务端 Key 注入
-- **部署**：EdgeOne Pages，`edgeone makers deploy` 一条命令上线
+- **后端**：`cloud-functions/llm-proxy` 通用处理器，透明转发 + 解决 CORS + 服务端 Key 注入；EdgeOne 直接加载，Cloudflare Pages 由 `functions/llm-proxy.ts` 薄适配层复用
+- **部署**：EdgeOne Pages（`edgeone makers deploy`）与 Cloudflare Pages（`wrangler pages deploy`）并存，前端代码零差异
 
 ## 目录
 
@@ -105,7 +106,9 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 │       ├── export.ts        # .ggb / TikZ / SVG / PNG 导出与 TikZ 降级生成
 │       └── image.ts         # 图片压缩与 base64 产出
 ├── cloud-functions/
-│   └── llm-proxy/           # EdgeOne 云函数：LLM 请求代理
+│   └── llm-proxy/           # 通用 LLM 请求代理（两个平台共用）
+├── functions/
+│   └── llm-proxy.ts         # Cloudflare Pages Functions 适配层 → /llm-proxy
 ├── public/geogebra/         # 本地 vendor 的 GeoGebra 5.0 静态资源
 ├── doc/                     # 效果截图与参考文档
 ├── .env.example             # 环境变量模板（复制为 .env 使用；.env 不入库）
@@ -157,6 +160,75 @@ edgeone makers deploy -n geogebra-webchat --skip-ai-gateway-sync
 
 浏览器打开网址，直接输入数学题或上传题目图片；右上角可临时覆盖模型名与接口地址。
 
+## 部署到 Cloudflare Pages
+
+本项目在 Cloudflare Pages 上还有一份部署，与 EdgeOne 站点并存、互不影响：
+
+- 默认访问：https://geogebra-webchat.pages.dev/
+- 自定义域：`geogebra-webchat.348349.xyz`（需按第 4 步补 CNAME 后生效）
+
+**前端零改动**：`/llm-proxy` 是同源相对路径，GeoGebra 静态资源也是同源 `/geogebra/...`，服务端 Key 与默认模型通过 `GET /llm-proxy` 下发，都是平台无关的。唯一要适配的是请求体，已由 `functions/llm-proxy.ts` 处理。
+
+### 第 1 步：构建
+
+```bash
+npm install
+npm run build          # 产物 dist/，约 50MB / 206 个文件
+```
+
+Pages 免费版上限 20,000 文件、单文件 25 MiB；本项目最大单文件约 10 MB，余量充足。构建环境默认 Node 22，满足项目的 `>=20`。
+
+### 第 2 步：创建项目并上传变量
+
+```bash
+npx wrangler login
+npx wrangler pages project create geogebra-webchat --production-branch main
+npx wrangler pages secret bulk .env --project-name geogebra-webchat
+```
+
+`.env` 里的 `MODEL_BASE_URL` / `MODEL_NAME` / `MODEL_API_KEY` 会作为加密 Secret 存进 Pages 的 production 环境，通过 `context.env` 注入函数，浏览器拿不到。也可以只把 `MODEL_API_KEY` 设为 Secret、另两个在控制台设为普通变量。
+
+### 第 3 步：部署
+
+```bash
+npx wrangler pages deploy dist --project-name geogebra-webchat --branch main
+```
+
+Wrangler 会自动编译根目录的 `functions/`（部署日志出现 `Compiled Worker successfully` 与 `Uploading Functions bundle`），把 `functions/llm-proxy.ts` 映射到 `/llm-proxy`；静态资源仍由 CDN 直接提供。
+
+### 第 4 步：自定义域（必须补 DNS）
+
+Pages 自定义域**不会自动创建 DNS 记录**。无论用 API 绑定还是在控制台 Add a custom domain，都还要在 DNS 里加一条：
+
+| 类型 | 名称 | 目标 | 代理状态 |
+|---|---|---|---|
+| CNAME | `geogebra-webchat`（或你的子域） | `geogebra-webchat.pages.dev` | 已代理 / Proxied（橙云） |
+
+未加之前项目里的域会一直停在 `pending`，状态提示 `CNAME record not set`。Wrangler 的 OAuth 登录只授予 `pages:write` / `zone:read`，**不含 DNS 编辑权限**，所以 `POST /zones/{zone}/dns_records` 会返回 403 `Authentication error`；这一步请在 Cloudflare 控制台 DNS 页面操作，或改用带 `Zone:DNS:Edit` 权限的 API Token。记录生效后证书自动签发，几分钟内域名变 `active`。
+
+### 也可以接 GitHub 自动部署
+
+在 Pages 项目设置里连接 GitHub 仓库：构建命令 `npm run build`、输出目录 `dist`、生产分支 `main`，以后 push 即自动部署；环境变量在 Pages 设置页填（Key 用 Secret）。此方式与 `wrangler pages deploy` 直接上传二选一，不要混用同一个项目。
+
+### 两个平台的差异（只有这一处）
+
+| | EdgeOne 云函数 | Cloudflare Pages Functions |
+|---|---|---|
+| 入口 | `cloud-functions/llm-proxy/index.ts` → `/llm-proxy` | `functions/llm-proxy.ts` → `/llm-proxy`，内部复用同一份通用处理器 |
+| 请求体 | 平台已解析成字符串 / 对象 | 标准 `Request`，body 是 `ReadableStream` |
+| 处理 | 直接读 `req.body` | 适配层先 `await request.text()` 再交给通用处理器；不做这步所有 POST 都会变成空 body |
+| 环境变量 | `edgeone makers env set KEY VALUE -e production` | `wrangler pages secret bulk` 或控制台 |
+
+白名单、CORS、SSE 惰性流包装、5.5MB 请求体保护全部复用同一份代码；Cloudflare 侧额外用 `content-length` 做 6MB 前置拦截。
+
+### 访问速度提醒
+
+Cloudflare 免费版没有中国大陆节点，`pages.dev` 与自定义域在国内部分运营商存在 DNS 污染、晚高峰不稳；本项目首次要拉约 50MB GeoGebra 资源，国内加载会明显慢于 EdgeOne。建议把 Cloudflare 站定位为**海外镜像 / 演示 / 备份入口**，国内主站继续用 EdgeOne。`index.html` 里 KaTeX CSS 走 `cdn.jsdelivr.net`，国内同样可能拖慢。
+
+### 验收清单
+
+`GET /llm-proxy` 返回 `{"serverKey":true,"provider":"custom","model":"deepseek-flash"}` → POST 文本有完整 body、SSE 能吐 `data:`、带图能读出颜色 → `/geogebra/deployggb.js` 与 10MB 的 `*.cache.js` 都 200 → 四种导出与「打开 .ggb」在新域下可用 → 回 EdgeOne 站回归一次确认没被影响。
+
 ## 本地开发（可选）
 
 前置：安装 [Node.js 20+](https://nodejs.org) 和 [EdgeOne CLI](https://pages.edgeone.ai/document/edgeone-cli)（`npm install -g edgeone`）。
@@ -183,6 +255,7 @@ edgeone makers dev
 > 填了 `MAKERS_MODELS_KEY` 会**整组**切到 EdgeOne 网关并忽略 `MODEL_*`；反之 Key 与端点必须成组切换，否则会「拿 A 的 Key 打 B 的网关」→ 401。
 > 线上变量用 `edgeone makers env set KEY VALUE -e production` 写入，部署时加 `--skip-ai-gateway-sync`。
 > 页面右上角的输入框仍可直接覆盖，方便临时调试。
+> Cloudflare Pages 用 `npx wrangler pages secret bulk .env --project-name <项目名>` 一次性写入（三个值都作为加密 Secret），或在项目设置页分别配置；变量名完全一致。
 
 ## 常见问题
 
@@ -198,6 +271,10 @@ edgeone makers dev
 
 > 当前默认配置已是 DeepSeek 官方 API，不会出现该错误；若自有 Key 返回 402，通常是账户余额不足。
 
+### Cloudflare 自定义域一直 pending / `CNAME record not set`
+
+Pages 绑定自定义域不会自动创建 DNS 记录。需要在 zone 里手动加一条 **CNAME → `<项目名>.pages.dev`** 并开启代理（橙云），详见「部署到 Cloudflare Pages · 第 4 步」。Wrangler 的 OAuth 授权不含 DNS 编辑权限，DNS API 会返回 403，请在控制台操作或改用带 `Zone:DNS:Edit` 权限的 API Token。
+
 ### POST /llm-proxy 返回 200 但响应体为空
 
 云函数曾直接把上游 `ReadableStream` 和全部响应头透传，EdgeOne 线上运行时会返回 200 却丢掉 body（本地 `makers dev` 正常，容易漏测）。修复方式：只透传 `content-type` / `cache-control` 等安全头，剔除 `transfer-encoding` / `content-length` / `connection`，并用惰性 `ReadableStream` 包一层上游 body。改动时不要退回 `new Headers(upstream.headers)` + `new Response(upstream.body)`。
@@ -208,7 +285,7 @@ edgeone makers dev
 文字 / 题目图片 ──→ 浏览器内的 AI 工具循环（Vercel AI SDK）
                        │  图片先经 src/lib/image.ts 压缩，随首步请求发出
                        ▼
-                 云函数 /llm-proxy（EdgeOne）──转发──→ 模型服务
+             /llm-proxy（EdgeOne 云函数 / Cloudflare Pages Functions）──转发──→ 模型服务
                        │  AI 生成 GeoGebra 命令
                        ▼
                  GeoGebra 画板逐条执行命令 → 图形出现
@@ -218,7 +295,7 @@ edgeone makers dev
 ```
 
 - **前端**：SolidJS + Vite，AI 逻辑跑在浏览器里（`src/ai-client.ts`），GeoGebra 用仓库自带的 5.0 本地构建加载
-- **后端**：只有一个 EdgeOne 云函数 `cloud-functions/llm-proxy`，负责转发模型请求、解决跨域、隐藏你的 Key
+- **后端**：`cloud-functions/llm-proxy` 是唯一一份通用处理器，负责转发模型请求、解决跨域、隐藏你的 Key；EdgeOne 直接加载，Cloudflare Pages 经 `functions/llm-proxy.ts` 适配请求体后复用
 - **命令规范化**：`src/lib/normalize.ts` 把中文命令别名自动转成 GeoGebra 英文命令
 - **图片与体积**：图片压缩后经云函数转发，云函数有 5.5MB 请求体保护；工具循环只在首步携带图片，历史轮自动剥离
 
@@ -232,6 +309,12 @@ edgeone makers dev
 - 画板工具栏增加能力探测与导出状态提示；云函数增加请求体大小保护
 - 默认模型切换为支持视觉输入的 `deepseek-flash`（DeepSeek 官方 API），配置改为 `MODEL_*` 一组环境变量；详见「环境变量」
 - 修复线上云函数返回 200 但响应体为空的问题，以及 402 额度错误、切换第三方服务商时的占位 Key 问题
+
+### 2026-11 · Cloudflare Pages 双平台部署
+
+- 新增 `functions/llm-proxy.ts`：把标准 `Request` 的流式 body 预读成字符串，再复用 EdgeOne 的通用处理器；前端代码零改动
+- 同一份 `dist` 与同一组 `MODEL_*` 变量可分别部署到 EdgeOne 与 Cloudflare Pages，两套站点互不影响
+- 补充 Cloudflare Pages 部署步骤、自定义域 CNAME 要求、平台差异与国内访问速度提醒
 
 ## 更多文档
 
