@@ -11,10 +11,18 @@ import {
   downloadText,
   fileToBase64,
   copyText,
-  normalizeTikZ,
-  buildTikZFallback,
-  type TikZParts,
 } from "./lib/export";
+import {
+  assembleDocument,
+  buildCompactTikZ,
+  buildSnapshotTikZ,
+  diffGeometry,
+  expectedGeometry,
+  extractTikzPicture,
+  parsePgfGeometry,
+  patchPgfWithMissing,
+} from "./lib/tikz";
+import { PROVIDERS, CUSTOM_PROVIDER_ID, findProvider, guessProviderId } from "./lib/providers";
 
 function preprocessMarkdown(text: string): string {
   // 1. Normalize LaTeX delimiters: \(→$, \)→$, \[→$$, \]→$$
@@ -78,7 +86,7 @@ const WAIT_TEXT: Record<WaitPhase, string> = {
   writing: "正在生成解答文字…",
 };
 
-type ExportKind = "ggb" | "tikz" | "png" | "svg";
+type ExportKind = "ggb" | "tikz" | "tikz-compact" | "png" | "svg";
 
 let _id = 1;
 const nextId = () => _id++;
@@ -137,6 +145,10 @@ export default function App() {
   const [baseUrl, setBaseUrl] = createSignal(localStorage.getItem(LS_BASE_URL) ?? "");
   // 服务端下发的默认接口地址，用来判断当前是否仍在使用服务端注入的 Key
   const [serverBaseUrl, setServerBaseUrl] = createSignal("");
+  // 当前选中的预置服务商（用于顶栏下拉回显）
+  const [providerId, setProviderId] = createSignal(
+    guessProviderId(localStorage.getItem(LS_BASE_URL) ?? "", ""),
+  );
   const [messages, setMessages] = createSignal<UiMessage[]>([]);
   const [coreMessages, setModelMessages] = createSignal<ModelMessage[]>([]);
   const [input, setInput] = createSignal("");
@@ -264,7 +276,10 @@ export default function App() {
       const data = await res.json();
       const srv = String(data?.baseURL ?? "");
       setServerBaseUrl(srv);
-      if (srv && !baseUrl()) setBaseUrl(srv);
+      if (srv && !baseUrl()) {
+        setBaseUrl(srv);
+        setProviderId("server");
+      }
       if (data?.model && !model()) setModel(data.model);
       // 只要目标仍是服务端配置的那个服务商，就用占位 Key 让云函数注入真 Key；
       // 用户手动切到别的服务商时不覆盖，避免把占位符透传过去。
@@ -311,6 +326,7 @@ export default function App() {
   function saveBaseUrl(v: string) {
     setBaseUrl(v);
     localStorage.setItem(LS_BASE_URL, v);
+    setProviderId(guessProviderId(v, serverBaseUrl()));
     // 切到与服务端配置不同的服务商时，占位 Key 透传过去只会得到 401，先清掉并要求填真 Key；
     // 切回服务端配置的地址时若无自定义 Key，恢复占位符让云函数继续注入。
     if (serverBaseUrl() && !usesServerEndpoint(v, serverBaseUrl()) && isPlaceholderKey(apiKey())) {
@@ -319,6 +335,29 @@ export default function App() {
     } else if (usesServerEndpoint(v, serverBaseUrl()) && !apiKey().trim()) {
       saveKey("server-injected");
     }
+  }
+
+  /** 切换预置服务商：一键填充 Base URL 与模型名。 */
+  function onProviderChange(id: string) {
+    setProviderId(id);
+    const p = findProvider(id);
+    if (!p) return;
+    if (id === "server") {
+      const srv = serverBaseUrl();
+      if (srv) saveBaseUrl(srv);
+      else setProviderId("server");
+      showHint("已切回服务端默认模型（API Key 由服务端注入，无需填写）");
+      return;
+    }
+    if (id === CUSTOM_PROVIDER_ID) {
+      showHint("请在右侧手动填写 Base URL、模型名与 API Key");
+      return;
+    }
+    saveBaseUrl(p.baseURL);
+    if (p.model) saveModel(p.model);
+    showHint(
+      `已切换到 ${p.label}（${p.model}）${p.vision ? "" : "；注意：该模型不支持图片输入"}`,
+    );
   }
 
   function patchMessage(id: number, fn: (m: UiMessage) => UiMessage) {
@@ -378,27 +417,69 @@ export default function App() {
 
   // ---------- 导出 ----------
 
-  /** 取 TikZ：优先 GeoGebra 原生 exportPGF，失败则用对象快照降级生成。 */
-  async function getTikZParts(): Promise<TikZParts> {
-    let raw: string;
+  /**
+   * 生成 TikZ。
+   * - 完整版：引擎原生 exportPGF（保留坐标轴、角度标记、线型），并做「对象 ↔ 绘图元素」
+   *   覆盖校验，发现缺失（多为同名覆盖导致）就自动补齐。
+   * - 精简版：同一份引擎产物去掉 pgfplots 坐标轴/网格、合并重复绘图、坐标取整，
+   *   保留颜色与标签，代码量小得多、更好二次编辑。
+   * 引擎 exportPGF 不可用时，两种模式都退回对象快照生成器。
+   */
+  async function buildTikZ(mode: "full" | "compact"): Promise<{ document: string; snippet: string; note: string }> {
+    const objects = ggb!.inspectObjects();
+    // 构造 XML 里有英文定义（applet 返回的 definition 是本地化的，中文环境下是「线段AB」）
+    const xml = ggb!.getXML();
+    let raw = "";
     try {
       raw = await ggb!.exportTikZ();
     } catch {
-      raw = buildTikZFallback(ggb!.inspectObjects());
+      raw = "";
     }
-    const parts = normalizeTikZ(raw);
-    if (!/\\begin\{tikzpicture\}/.test(parts.snippet)) {
-      throw new Error("返回的 TikZ 内容为空或格式异常");
+
+    if (!raw.trim()) {
+      const doc = buildSnapshotTikZ(objects, xml);
+      return {
+        document: doc,
+        snippet: extractTikzPicture(doc),
+        note: "引擎 exportPGF 不可用，已改用对象快照生成",
+      };
     }
-    return parts;
+
+    if (mode === "compact") {
+      const c = buildCompactTikZ(raw);
+      return {
+        document: c.document,
+        snippet: c.snippet,
+        note: `精简版：去掉坐标轴/网格，合并 ${c.stats.removedDuplicates} 条重复绘图，坐标取 2 位小数`,
+      };
+    }
+
+    const expected = expectedGeometry(objects, xml);
+    const actual = parsePgfGeometry(raw);
+    const missing = diffGeometry(expected, actual);
+    let patched = raw;
+    let added = 0;
+    let colorDefs: string[] = [];
+    if (missing.total > 0) {
+      const r = patchPgfWithMissing(raw, missing, objects);
+      patched = r.patched;
+      added = r.added;
+      colorDefs = r.pool.defs;
+    }
+    const assembled = assembleDocument(patched, colorDefs);
+    const note =
+      added > 0
+        ? `检测到 ${missing.total} 个对象未出现在引擎导出中（多为同名覆盖），已自动补齐 ${added} 个`
+        : `已校验 ${expected.edges.size} 条线段 / ${expected.circles.size} 个圆，导出内容与画板一致`;
+    return { document: assembled.document, snippet: assembled.snippet, note };
   }
 
-  async function exportTikZ() {
+  async function exportTikZ(mode: "full" | "compact") {
     try {
-      const parts = await getTikZParts();
+      const parts = await buildTikZ(mode);
       downloadText(parts.document, timestampName("tex"), "application/x-tex;charset=utf-8");
       setLastTikZ(parts.snippet);
-      showHint("已导出 TikZ（完整 .tex）；点「复制 TikZ」可取片段");
+      showHint(`${mode === "compact" ? "精简" : "完整"} TikZ 已导出 · ${parts.note}`);
     } catch (e) {
       // 最后一档降级：TikZ 完全不可用时导出 SVG，并明确告知用户
       try {
@@ -430,8 +511,10 @@ export default function App() {
         const svg = await ggb.exportSVG();
         downloadText(svg, timestampName("svg"), "image/svg+xml;charset=utf-8");
         showHint("已导出 SVG 图片");
-      } else {
-        await exportTikZ();
+      } else if (kind === "tikz") {
+        await exportTikZ("full");
+      } else if (kind === "tikz-compact") {
+        await exportTikZ("compact");
       }
     } catch (e) {
       showHint(`导出失败：${(e as Error).message}`);
@@ -444,7 +527,7 @@ export default function App() {
     if (!ggb) return;
     setBusy("copy");
     try {
-      const snippet = lastTikZ() || (await getTikZParts()).snippet;
+      const snippet = lastTikZ() || (await buildTikZ("full")).snippet;
       setLastTikZ(snippet);
       showHint((await copyText(snippet)) ? "已复制 tikzpicture 片段" : "复制失败，请检查剪贴板权限");
     } catch (e) {
@@ -575,6 +658,14 @@ export default function App() {
       <header class="topbar">
         <div class="brand">GeoChat Web</div>
         <div class="settings">
+          <select
+            class="provider-select"
+            title="一键切换模型服务商（自动填好接口地址与模型名）"
+            value={providerId()}
+            onChange={(e) => onProviderChange(e.currentTarget.value)}
+          >
+            <For each={PROVIDERS}>{(p) => <option value={p.id}>{p.label}</option>}</For>
+          </select>
           <input
             class="input-key"
             type="password"
@@ -607,6 +698,14 @@ export default function App() {
               </button>
               <button class="tool-btn" disabled={!ggbReady() || !!busy()} onClick={() => doExport("tikz")}>
                 {busy() === "tikz" ? "导出中…" : "导出 TikZ"}
+              </button>
+              <button
+                class="tool-btn"
+                disabled={!ggbReady() || !!busy()}
+                onClick={() => doExport("tikz-compact")}
+                title="去掉坐标轴与网格、合并重复绘图、坐标取整，代码更少更好改"
+              >
+                {busy() === "tikz-compact" ? "导出中…" : "精简 TikZ"}
               </button>
               <button class="tool-btn" disabled={!ggbReady() || !!busy()} onClick={() => copyTikZ()}>
                 {busy() === "copy" ? "处理中…" : "复制 TikZ"}

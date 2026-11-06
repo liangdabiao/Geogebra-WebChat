@@ -21,6 +21,7 @@ const ALLOWED_HOSTS = new Set([
   "api.openai.com",
   "api.moonshot.cn",
   "api.zhipuai.cn",
+  "open.bigmodel.cn",
   "dashscope.aliyuncs.com",
   "api.siliconflow.cn",
   "api-inference.modelscope.cn",

@@ -63,23 +63,84 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 - **2D / 3D 支持**：平面几何和立体图形均可
 - **多模型兼容**：通过 OpenAI 兼容 API，可切换任意大模型（DeepSeek、通义千问、GPT 等）
 - **服务端 Key 注入**：可选隐藏 API Key，不暴露给浏览器
-- **多格式导出**：一键导出 `.ggb`、PGF/TikZ `.tex`、PNG、SVG，并可复制 `tikzpicture` 片段
+- **多格式导出**：一键导出 `.ggb`、TikZ `.tex`（完整 / 精简两种）、PNG、SVG，并可复制 `tikzpicture` 片段
 - **打开 .ggb**：载入已有构造继续编辑
 - **图片读题**：输入框支持上传 / 粘贴 / 拖入图片，模型读图后生成 GeoGebra 命令并作图
 - **可拖拽分栏**：左右画板与聊天区之间有一条分隔条，可自由拖动调整宽度，比例自动记忆
 - **生成中等待提示**：显示当前阶段（读题 / 执行作图命令 / 生成解答）与已等待秒数
 - **公式可正常复制**：公式只渲染一份，回复下方可「复制原文」拿到规范 `$...$` Markdown
+- **服务商一键切换**：顶栏下拉切换 DeepSeek / 通义千问 / 智谱 / Kimi / SiliconFlow / OpenAI，自动填好接口地址与模型名
 
 ---
 
 ## 导出与图片上传
 
-画板上方工具栏提供 `.ggb`、TikZ、PNG、SVG 导出与「打开 .ggb」。
+画板上方工具栏提供 `.ggb`、TikZ（完整 / 精简）、PNG、SVG 导出与「打开 .ggb」。
 
 - `.ggb` 走 GeoGebra 的 `getBase64()`，得到标准二进制构造文件；「打开 .ggb」用 `setBase64()` 回载。导出时先校验 ZIP 文件头，再补上桌面版常见的 `geogebra_thumbnail.png`（网页 applet 的 `getBase64()` 产物默认不带缩略图），以提高 GeoGebra 桌面软件的兼容性；补图失败会自动回退引擎原始产物，不会让导出失败。
-- TikZ 优先调用本地 GeoGebra 5.0 构建里的 `exportPGF(callback)`（该 API 未列入官方文档）；若超时或失败，自动降级到基于对象快照的自研生成器，最后再降级为导出 SVG。产物是可编译的完整 `.tex`，「复制 TikZ」给的是 `tikzpicture` 片段。PGF/TikZ 只覆盖 2D 图形视图。
+- **「导出 TikZ」= 完整版**：直接采用本地 GeoGebra 5.0 构建里 `exportPGF(callback)` 的原生产物（该 API 未列入官方文档），保留坐标轴、网格、角度标记、线型与颜色，输出可编译的完整 `.tex`。
+- **「精简 TikZ」= 精简版**：同一份引擎产物去掉 pgfplots 坐标轴/网格环境、合并重复绘图、坐标取整到 2 位小数，保留颜色、线型与标签，代码量小很多、更好二次编辑。
+- **导出前会做覆盖校验**：用画板对象快照（线段端点、圆心半径）逐项比对引擎产物里的绘图元素，一旦发现某个对象没被画出来，会自动把它补进 `.tex` 并在提示条里说明补了几个。
+- 引擎 `exportPGF` 超时或不可用时，两种模式都自动降级到**基于对象快照的自研生成器**（点 / 线段 / 直线 / 射线 / 圆 / 多边形 / 函数 / 文本，含颜色与虚线样式），最后再降级为导出 SVG。
+- 「复制 TikZ」给的是 `tikzpicture` 片段。PGF/TikZ 只覆盖 2D 图形视图。
+
+> **为什么 TikZ 生成器要读构造 XML？** applet 的 `getDefinitionString()` / `getCommandString()` 返回的是**本地化字符串**（中文环境下是「线段AB」「圆周(C, 1.5)」），按英文正则解析端点在中文下必然失效——这正是旧版降级生成器只能画出点、画不出线段的原因。只有 `getXML()` 里的定义始终是英文（`<command name="Segment"><input a0="B" a1="C"/>`），所以对象快照统一从 XML 还原英文定义。
+
 - 图片上传后统一缩放到长边 ≤1280px 并转 JPEG，控制在几百 KB，最多 4 张。这是为了适应 EdgeOne Cloud Functions 6MB 请求体上限；图片只在工具循环首步发送，历史轮自动剥离，避免 6 步循环重复传图。
 - 图片以 base64 嵌在 OpenAI 兼容的 `image_url` 里经 `/llm-proxy` 转发，因此**所用模型需要支持图片输入**。
+
+---
+
+## 「图形莫名消失」的两个根因与修复
+
+这两个问题在浏览器里都表现为「画着画着少了一条线」，已逐条实测定位并修复：
+
+**1. 同名覆盖（真正的元凶）**
+
+GeoGebra 会给无名对象自动分配标签：`Segment(A,B)` 得到 `f`，`Segment(B,C)` 得到 `g`，多边形的边得到 `a`、`b`、`c_1`。而模型几乎必然会输出 `f(x)=…` 这类函数定义——**函数名 `f` 会静默顶掉那条线段**，对象数量甚至不变（名字被复用），所以画面上只是"少了一条线"，很难察觉。
+
+修复：执行**每一条**命令之前检查它要定义的名字，若撞上一个自动标签就先给旧对象改名让路（样式、依赖关系都保留，新名字用 `ggbauto1` 这类避开 GeoGebra 函数名空间的形式），并在对话里提示「为避免同名覆盖，已自动重命名：f → ggbauto1」。显式命名（模型自己写的 `A`、`B`、`alpha`）允许覆盖，那是模型的有意行为。
+
+> 顺带说明：`Rename("s","x")` 这种**带引号**的形式是错的——GeoGebra 会把 `"s"` 当字符串字面量，结果新建一个 text 对象、原对象纹丝不动。正确写法是 `Rename(s,"x")` 或 applet 的 `api.renameObject("s","x")`，本项目用的是后者。
+
+**2. 样式命令被误判为失败 → 整板回滚**
+
+GeoGebra 的 `evalCommand` 对 `SetLineStyle` / `SetColor` / `SetLineThickness` / `ShowLabel` / `SetVisibleInView` / `Rename` 这类脚本命令**一律返回 `false`**，但副作用完全生效（实测 `SetLineStyle(s,1)` 让 `getLineStyle` 从 0 变成 1，PGF 里也确实出现 `dash pattern=on 1pt off 1pt`）。旧版逻辑把 `false` 当成执行失败，于是**一条样式命令就会触发整块画板回滚**，用户看到的现象是"刚画好的图突然全没了"。
+
+修复：脚本/样式命令不再按布尔返回值判失败；赋值命令改为「返回 false 但对象确实存在就算成功」；并且**只有整批命令全部失败才回滚**，个别命令失败时保留已画出的图形，把失败清单回灌给模型让它自己下一轮修正。
+
+---
+
+## 模型服务商一键切换
+
+右上角新增服务商下拉框，选中即自动填好 Base URL 与模型名：
+
+| 预设 | Base URL | 模型 | 支持读图 |
+| --- | --- | --- | --- |
+| 服务端默认（免填 Key） | 由部署方配置 | 由部署方配置 | 取决于所配模型 |
+| DeepSeek 官方 | `https://api.deepseek.com` | `deepseek-flash` | ✅ |
+| 通义千问（阿里云百炼） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-vl-max` | ✅ |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4v-plus` | ✅ |
+| 月之暗面 Kimi | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` | ❌ |
+| 硅基流动 SiliconFlow | `https://api.siliconflow.cn/v1` | `Qwen/Qwen2.5-VL-72B-Instruct` | ✅ |
+| OpenAI 官方 | `https://api.openai.com/v1` | `gpt-4o-mini` | ✅ |
+| 自定义 | 手动填写 | 手动填写 | 取决于所配模型 |
+
+- 切换到「服务端默认」会恢复占位 Key，让云函数注入真实密钥；切到其它服务商时占位 Key 会自动清空并提示填写该服务商的 Key。
+- **API Key 只存在浏览器 `localStorage`**，不写进仓库、不上传服务器。切换服务商只改 Base URL 与模型名。
+- 预设里的域名必须都在 `/llm-proxy` 的白名单内，否则前端能选、云函数会拒（403 `target host not allowed`）。调整白名单见 `cloud-functions/llm-proxy/index.ts` 的 `ALLOWED_HOSTS`。
+
+---
+
+## 作图提示词（模型怎么写 GeoGebra 命令）
+
+系统提示词里内置了一份 GeoGebra 官方指令速查（点 / 线段 / 直线射线 / 圆弧扇形 / 角与平分线 / 三角形四心 / 交点测量向量 / 变换 / 样式命令），以及三条硬规则：
+
+- **依赖顺序**：先定义坐标已知的点，再画基本图元，最后生成依赖它们的派生对象；被依赖的对象必须先定义。
+- **封闭多边形用 `Segment` 逐边绘制**（`Segment(A,B)`、`Segment(B,C)`、`Segment(C,A)`），不用 `Polygon`——`Polygon` 的填充与顶点顺序在导出 TikZ 时容易丢失。
+- **要设置样式的对象必须显式命名**（`s = Segment(A,B)` 再 `SetLineStyle(s,1)`）。否则模型不知道自动分配的名字叫什么，一旦撞上函数名 `f(x)=…` 还会把线段顶掉。
+
+这些指令语法都是 GeoGebra 官方文档里的公开事实（命令名 + 参数顺序），与任何第三方实现无关。
 
 ---
 
@@ -151,7 +212,9 @@ GeoGebra 是一款优秀的动态数学软件（Geometry + Algebra），全球�
 │   ├── styles.css
 │   └── lib/
 │       ├── normalize.ts     # 命令规范化（中文别名→英文）
-│       ├── export.ts        # .ggb / TikZ / SVG / PNG 导出与 TikZ 降级生成
+│       ├── export.ts        # 下载 / 复制等通用文件工具
+│       ├── tikz.ts          # TikZ 生成、精简、覆盖校验与快照兜底
+│       ├── providers.ts     # 预置模型服务商清单
 │       ├── ggb.ts           # .ggb ZIP 缩略图补全与文件头校验
 │       └── image.ts         # 图片压缩与 base64 产出
 ├── cloud-functions/
@@ -332,6 +395,15 @@ Pages 绑定自定义域不会自动创建 DNS 记录。需要在 zone 里手动
 
 EdgeOne 运行时可能把 `context.request` 直接给成标准 `Request`，其 `body` 是 `ReadableStream`；沿用 `JSON.stringify(req.body)` 会得到 `{}`，上游模型收到空对象就报 `missing field messages`（GET 探测仍正常，容易误判为额度或 Key 问题）。通用处理器现在优先 `await req.text()`，失败再回退到平台已解析的字符串 / 普通对象；Cloudflare 侧仍由 `functions/llm-proxy.ts` 预读 body，两条路径都覆盖。
 
+### 画着画着少了一条线 / 画板突然全清空
+
+这是两个已修复的历史问题，新版不会再出现：
+
+- **少了一条线**：GeoGebra 给无名对象自动分配 `f`、`g`、`a` 这类标签，而模型输出的函数名 `f(x)=…` 会**静默顶掉**同名线段（对象总数甚至不变，只是名字被复用）。现在每条命令执行前都会检查名字冲突，撞上自动标签就先把旧对象改名让路，并在对话里提示「已自动重命名：f → ggbauto1」。若你在代数区看到 `ggbauto1` 这类名字，那就是被保护下来的原对象。
+- **画板突然全清空**：旧逻辑把 `SetLineStyle` / `SetColor` 这类脚本命令的 `false` 返回值当成执行失败，而 GeoGebra 对这些命令**恰恰返回 `false` 却生效**，于是触发整板回滚。现在脚本命令不再按布尔值判失败，且只有整批命令全部失败才回滚。
+
+如果你在旧版本部署上遇到，可以手动加一条线段同名的新对象（比如把 `f` 改成 `f1`）先绕开。
+
 ### 复制出来的公式重复、被拆成单字符
 
 KaTeX 默认同时输出 MathML 与 HTML 两份，隐藏的 MathML 仍会被选中，于是 `2` 变成 `2 2`、`BDE` 变成 `B D E BDE`。现在固定 `output: "html"` 只输出一份。若仍看到带换行的排版碎片，那是 KaTeX 分式/根号的 CSS 定位所致，点「复制原文」即可拿到规范 Markdown。
@@ -348,7 +420,7 @@ KaTeX 默认同时输出 MathML 与 HTML 两份，隐藏的 MathML 仍会被选�
                  GeoGebra 画板逐条执行命令 → 图形出现
                        │
                        ├──→ AI 再用文字解释几何关系（流式输出）
-                       └──→ 导出 .ggb / TikZ / PNG / SVG（src/lib/export.ts）
+                       └──→ 导出 .ggb / TikZ（完整·精简）/ PNG / SVG（src/lib/tikz.ts、src/lib/export.ts）
 ```
 
 - **前端**：SolidJS + Vite，AI 逻辑跑在浏览器里（`src/ai-client.ts`），GeoGebra 用仓库自带的 5.0 本地构建加载
@@ -357,6 +429,16 @@ KaTeX 默认同时输出 MathML 与 HTML 两份，隐藏的 MathML 仍会被选�
 - **图片与体积**：图片压缩后经云函数转发，云函数有 5.5MB 请求体保护；工具循环只在首步携带图片，历史轮自动剥离
 
 ## 更新记录
+
+### 2026-11 · 图形丢失修复、TikZ 双版本与服务商切换
+
+- **修复「图形莫名消失」**：定位到两个真实根因并逐一修复——① 同名覆盖：GeoGebra 自动给无名对象分配 `f`/`g`/`a` 等标签，模型的 `f(x)=…` 会静默顶掉同名线段（对象数不变，极难察觉）；现逐条命令执行前检测并给旧对象改名让路，新名用 `ggbauto1` 这类避开 GeoGebra 函数名空间的形式。② 样式命令假失败：`SetLineStyle`/`SetColor` 等脚本命令的 `evalCommand` 恒返回 `false` 但副作用生效，旧逻辑据此触发**整板回滚**；现改为按命令类型判定，且只有整批全失败才回滚
+- **TikZ 导出分两档**：「导出 TikZ」= 引擎 `exportPGF` 原生产物（保留坐标轴、角度标记、线型、颜色）；「精简 TikZ」= 去掉 pgfplots 坐标轴/网格、合并重复绘图、坐标取整到 2 位小数，代码更少更好改
+- **导出前覆盖校验**：用对象快照逐项比对引擎产物的绘图元素，发现缺失自动补进 `.tex` 并在提示条说明补了几个
+- **TikZ 生成器改读构造 XML**：applet 的 `getDefinitionString()`/`getCommandString()` 返回本地化字符串（中文环境下是「线段AB」），英文正则必然解析失败——这正是旧版降级生成器画不出线段的原因；现统一从 `getXML()` 还原英文定义，覆盖校验与快照兜底都能正确处理端点与圆心
+- **系统提示词内置 GeoGebra 官方指令速查**（点 / 线段 / 直线射线 / 圆弧扇形 / 角与平分线 / 三角形四心 / 交点测量向量 / 变换 / 样式命令），并明确依赖顺序、封闭多边形用 `Segment` 逐边、样式对象必须显式命名三条规则
+- **顶栏新增服务商下拉**：DeepSeek / 通义千问 / 智谱 GLM / Kimi / SiliconFlow / OpenAI 一键切换，自动填好 Base URL 与模型名；Key 仍只存 `localStorage`；白名单补 `open.bigmodel.cn`
+- 无头 Chrome 实测：11 个对象全部保留（含虚线、红色样式），4 条线段与视口外线段在完整版/精简版中均在；人为删掉一条线段后覆盖校验能发现并补回；快照兜底能画出点、线段、圆与函数
 
 ### 2026-11 · 导出与多模态
 

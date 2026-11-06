@@ -83,6 +83,23 @@ body {
   width: 280px;
 }
 
+/* 预置服务商下拉 */
+.provider-select {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  max-width: 190px;
+  cursor: pointer;
+}
+
+.provider-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* 主区：左画板 / 可拖拽分隔条 / 右聊天，比例由 --split 控制 */
 .main {
   flex: 1;

@@ -10,6 +10,7 @@
  */
 
 import { appendZipEntry, base64ToBytes, bytesToBase64, isZipBytes } from "./lib/ggb";
+import { parseConstructionXml } from "./lib/tikz";
 
 declare global {
   interface Window {
@@ -41,7 +42,7 @@ export interface ExportCapabilities {
   version: string;
 }
 
-/** 供 TikZ 降级生成器使用的对象快照。 */
+/** 供 TikZ 生成与覆盖校验使用的对象快照。 */
 export interface GgbObjectInfo {
   name: string;
   type: string;
@@ -50,13 +51,26 @@ export interface GgbObjectInfo {
   z: number;
   value: string;
   definition: string;
+  /** 英文定义（来自构造 XML）。applet 的 definition 是本地化的，中文环境下是「线段AB」。 */
+  englishDef: string;
   color: string;
   visible: boolean;
   lineThickness: number;
+  /** 线型：0 实线 / 1 虚线 / 2 点线 / 3 点划线 */
+  lineStyle: number;
   pointSize: number;
   filling: number;
   caption: string;
   labelVisible: boolean;
+}
+
+export interface ExecuteResult {
+  ok: boolean;
+  failed: string[];
+  /** 为避免同名覆盖而自动重命名的对象，格式 `旧名 → 新名`。 */
+  renamed: string[];
+  /** 批次中定义、但此前已存在的对象名（模型有意覆盖）。 */
+  overwritten: string[];
 }
 
 export interface GeoGebraController {
@@ -105,20 +119,147 @@ function stripDataUrl(s: string): string {
   return i >= 0 ? s.slice(i + 7) : s;
 }
 
-function evalOne(api: any, command: string): boolean {
-  if (!api) return false;
+/**
+ * 脚本 / 样式类命令。
+ * 实测：GeoGebra 的 evalCommand 对这类命令返回 **false**，但副作用完全生效
+ * （SetLineStyle 让 getLineStyle 从 0 变 1、SetColor 改了颜色、SetLineThickness 改了线宽）。
+ * 早期版本把它们当成「执行失败」，进而触发整板回滚 —— 一条样式命令就能让画板变空。
+ */
+const SCRIPT_COMMAND =
+  /^(Set|Show|Hide|Delete|Rename|Toggle|Zoom|Center|Move|Pan|Play|Pause|Start|Stop|Clear|Select|Unselect|Redraw|Animation|LabelColor|LabelPosition|CopyToClipboard|PasteFromClipboard|ExportToClipboard|SetActiveView|SetConstructionStep)\b/i;
+
+/**
+ * GeoGebra 自动分配给无名对象的标签池：单个小写字母（f、g、h…），
+ * 占用后再用 `c_1`、`c_2` 这类形式。
+ * 模型若用同一个名字定义函数，会静默顶掉那条自动命名的线段。
+ */
+const AUTO_LABEL = /^[a-z](_\d+)?$/;
+
+/**
+ * 改名让路时使用的新标签。
+ * 必须避开 GeoGebra 的**函数名空间**（f、g、h… 以及 f1、g1 这类形式）：
+ * 实测把线段改名为 `f1` 会被 GeoGebra 当成函数名，线段直接变成 text 对象而消失。
+ */
+const RENAME_PREFIX = "ggbauto";
+
+/** 从命令里取出它会定义的对象名：`A=(0,0)` → A，`f(x)=x^2` → f。 */
+function definedObjectName(cmd: string): string | null {
+  const m = /^\s*([^\s(=<>]+)\s*(\([^)]*\))?\s*=/.exec(cmd);
+  return m ? m[1] : null;
+}
+
+/**
+ * 执行一条命令并判断是否真的失败。
+ * 不能只看 evalCommand 的布尔返回值——脚本命令恒为 false 却有效。
+ */
+function runCommand(api: any, cmd: string): boolean {
+  let ret: unknown;
   try {
-    // evalCommand 同步返回 boolean，优先使用
-    if (typeof api.evalCommand === "function") return !!api.evalCommand(command);
-    // asyncEvalCommandResult 是异步的，拿不到返回值，只能乐观假设成功
-    if (typeof api.asyncEvalCommandResult === "function") {
-      api.asyncEvalCommandResult(command);
-      return true;
-    }
+    ret = api.evalCommand(cmd);
   } catch {
     return false;
   }
+  if (ret === true) return true;
+  // 脚本 / 样式命令：返回 false 是 GeoGebra 的正常语义，副作用已生效
+  if (SCRIPT_COMMAND.test(cmd)) return true;
+  // 赋值命令：返回 false 但对象已存在，说明只是返回语义问题
+  const name = definedObjectName(cmd);
+  if (name && typeof api.getAllObjectNames === "function") {
+    try {
+      return Array.from(api.getAllObjectNames() as Iterable<unknown>).some((n) => String(n) === name);
+    } catch {
+      return false;
+    }
+  }
   return false;
+}
+
+/**
+ * 安全改名。
+ *
+ * 实测（本项目在 GeoGebra 5.0 web3d 上逐个验证）：
+ *   - `Rename("s","x")`  → **错**：引号让 GeoGebra 把 "s" 当字符串字面量，
+ *     结果新建了一个 text 对象，原线段原封不动还在。
+ *   - `Rename(s,"x")`    → 对，但依赖命令解析。
+ *   - `api.renameObject("s","x")` → 对，且最直接，优先用它。
+ * 每次都回读对象列表校验改名是否真的生效。
+ */
+function renameObjectSafe(api: any, from: string, to: string): boolean {
+  const namesNow = (): string[] => {
+    try {
+      return Array.from(api.getAllObjectNames() as Iterable<unknown>).map(String);
+    } catch {
+      return [];
+    }
+  };
+  const ok = () => {
+    const names = namesNow();
+    return names.includes(to) && !names.includes(from);
+  };
+  try {
+    if (typeof api.renameObject === "function") {
+      api.renameObject(from, to);
+      if (ok()) return true;
+    }
+  } catch {
+    /* 试命令形式 */
+  }
+  try {
+    // 对象名不加引号，加引号会被当成字符串
+    api.evalCommand(`Rename(${from},"${to}")`);
+    if (ok()) return true;
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
+ * 同名覆盖保护。
+ *
+ * GeoGebra 给无名对象自动分配单字母标签（Segment(A,B) → f，多边形的边 → a、b、c_1）。
+ * 模型几乎必然会输出 `f(x)=…` 这类函数定义，于是**函数会静默顶掉那条线段**——
+ * 画面上少一条线，导出时才发现，正是「图形莫名消失」的根因。
+ *
+ * 策略：在执行**每一条**命令之前检查它要定义的名字。
+ *  - 若该名字已被一个「自动标签」占用 → 先把旧对象改名让路（样式、依赖关系都保留）；
+ *  - 若被一个显式命名的对象占用 → 允许覆盖（那是模型的有意行为），只做记录。
+ *
+ * 必须是逐条检查而不是整批检查：冲突常常发生在同一批命令内部
+ * （先 `Segment(A,B)` 自动得到 f，后面 `f(x)=…` 就撞上了）。
+ */
+function protectNameBeforeCommand(api: any, cmd: string): { renamed: string[]; overwritten: string[] } {
+  const renamed: string[] = [];
+  const overwritten: string[] = [];
+  const name = definedObjectName(cmd);
+  if (!name) return { renamed, overwritten };
+  if (typeof api?.getAllObjectNames !== "function") return { renamed, overwritten };
+
+  let existing: string[];
+  try {
+    existing = Array.from(api.getAllObjectNames() as Iterable<unknown>).map(String);
+  } catch {
+    return { renamed, overwritten };
+  }
+  if (!existing.includes(name)) return { renamed, overwritten };
+
+  if (!AUTO_LABEL.test(name)) {
+    overwritten.push(name);
+    return { renamed, overwritten };
+  }
+
+  // 找一个空闲标签（避开函数名空间）
+  const taken = new Set(existing);
+  let candidate = `${RENAME_PREFIX}1`;
+  let i = 1;
+  while (taken.has(candidate)) {
+    i++;
+    candidate = `${RENAME_PREFIX}${i}`;
+  }
+  if (renameObjectSafe(api, name, candidate)) {
+    renamed.push(`${name} → ${candidate}`);
+  }
+  return { renamed, overwritten };
 }
 
 async function clearAll(api: any): Promise<void> {
@@ -281,7 +422,7 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
   const has = (name: string) => typeof api?.[name] === "function";
   const getVersion = () => (has("getVersion") ? safeString(() => api.getVersion()) : "unknown");
 
-  /** 遍历画板对象，取几何与样式信息，供 TikZ 降级生成器使用。 */
+  /** 遍历画板对象，取几何与样式信息，供 TikZ 生成与覆盖校验使用。 */
   const inspectObjects = (): GgbObjectInfo[] => {
     if (!has("getAllObjectNames")) return [];
     let names: string[] = [];
@@ -290,26 +431,43 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
     } catch {
       return [];
     }
-    return names.map((name) => ({
-      name,
-      type: has("getObjectType") ? safeString(() => api.getObjectType(name)).toLowerCase() : "",
-      x: has("getXcoord") ? safeNumber(() => api.getXcoord(name)) : 0,
-      y: has("getYcoord") ? safeNumber(() => api.getYcoord(name)) : 0,
-      z: has("getZcoord") ? safeNumber(() => api.getZcoord(name)) : 0,
-      value: has("getValueString") ? safeString(() => api.getValueString(name, false)) : "",
-      definition: has("getDefinitionString") ? safeString(() => api.getDefinitionString(name, false)) : "",
-      color: has("getColor") ? safeString(() => api.getColor(name)) : "",
-      visible: has("getVisible")
-        ? (() => { try { return !!api.getVisible(name); } catch { return true; } })()
-        : true,
-      lineThickness: has("getLineThickness") ? safeNumber(() => api.getLineThickness(name)) : 1,
-      pointSize: has("getPointSize") ? safeNumber(() => api.getPointSize(name)) : 3,
-      filling: has("getFilling") ? safeNumber(() => api.getFilling(name)) : 0,
-      caption: has("getCaption") ? safeString(() => api.getCaption(name, false)) : "",
-      labelVisible: has("getLabelVisible")
-        ? (() => { try { return !!api.getLabelVisible(name); } catch { return false; } })()
-        : false,
-    }));
+    // applet 的 getDefinitionString / getCommandString 返回本地化字符串
+    // （中文环境下是「线段AB」「圆周(C, 1.5)」），只有构造 XML 里是英文。
+    let xmlDefs = new Map<string, string>();
+    try {
+      const parsed = parseConstructionXml(api.getXML());
+      xmlDefs = new Map([...parsed.entries()].map(([k, v]) => [k, v.def]));
+    } catch {
+      /* ignore */
+    }
+    return names.map((name) => {
+      const xmlDef = xmlDefs.get(name);
+      const type = has("getObjectType")
+        ? safeString(() => api.getObjectType(name)).toLowerCase()
+        : "";
+      return {
+        name,
+        type: type || (xmlDef ? "" : ""),
+        x: has("getXcoord") ? safeNumber(() => api.getXcoord(name)) : 0,
+        y: has("getYcoord") ? safeNumber(() => api.getYcoord(name)) : 0,
+        z: has("getZcoord") ? safeNumber(() => api.getZcoord(name)) : 0,
+        value: has("getValueString") ? safeString(() => api.getValueString(name, false)) : "",
+        definition: has("getDefinitionString") ? safeString(() => api.getDefinitionString(name, false)) : "",
+        englishDef: xmlDef ?? "",
+        color: has("getColor") ? safeString(() => api.getColor(name)) : "",
+        visible: has("getVisible")
+          ? (() => { try { return !!api.getVisible(name); } catch { return true; } })()
+          : true,
+        lineThickness: has("getLineThickness") ? safeNumber(() => api.getLineThickness(name)) : 1,
+        lineStyle: has("getLineStyle") ? safeNumber(() => api.getLineStyle(name)) : 0,
+        pointSize: has("getPointSize") ? safeNumber(() => api.getPointSize(name)) : 3,
+        filling: has("getFilling") ? safeNumber(() => api.getFilling(name)) : 0,
+        caption: has("getCaption") ? safeString(() => api.getCaption(name, false)) : "",
+        labelVisible: has("getLabelVisible")
+          ? (() => { try { return !!api.getLabelVisible(name); } catch { return false; } })()
+          : false,
+      };
+    });
   };
 
   return {
@@ -328,20 +486,29 @@ export async function mountGeoGebra(containerId: string): Promise<GeoGebraContro
       if (opts.resetBefore) await clearAll(api);
       if (opts.perspective) await applyPerspective(api, opts.perspective);
 
+      const renamed: string[] = [];
+      const overwritten: string[] = [];
       const failed: string[] = [];
       for (let i = 0; i < commands.length; i++) {
-        const ok = evalOne(api, commands[i]);
+        // 逐条执行前做同名覆盖保护（冲突常发生在同一批命令内部）
+        const guard = protectNameBeforeCommand(api, commands[i]);
+        renamed.push(...guard.renamed);
+        overwritten.push(...guard.overwritten);
+
+        const ok = runCommand(api, commands[i]);
         if (!ok) failed.push(commands[i]);
         if (i < commands.length - 1) await delay(80);
       }
-      if (failed.length && opts.restoreOnError && savedXml) {
+      // 只有「整批都失败」才回滚：个别命令失败时保留已成功的图形，
+      // 把失败清单回灌给模型让它自己修正，比整板清空友好得多。
+      if (failed.length && failed.length === commands.length && opts.restoreOnError && savedXml) {
         try {
           api.setXML(savedXml);
         } catch {
           /* ignore */
         }
       }
-      return { ok: failed.length === 0, failed };
+      return { ok: failed.length === 0, failed, renamed, overwritten };
     },
     setPerspective: async (mode) => {
       await ready;
