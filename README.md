@@ -8,13 +8,13 @@
 
 | 定位 | 地址 | 说明 |
 |---|---|---|
-| Cloudflare 自定义域（推荐） | https://geogebra-webchat.348349.xyz/ | 公开可访问，无需任何配置 |
+| EdgeOne（国内主站，国内用户推荐） | https://geogebra-webchat.liangdabiao.com/ | 国内线路更快，已绑自定义域、公开可访问 |
+| Cloudflare 自定义域（海外推荐） | https://geogebra-webchat.348349.xyz/ | 公开可访问，无需任何配置 |
 | Cloudflare Pages 默认域 | https://geogebra-webchat.pages.dev/ | 同一个部署的备用入口 |
-| EdgeOne（国内主站） | https://geogebra-webchat-mup5octs.edgeone.cool/ | 国内线路更快；预览域名有访问鉴权，见下方说明 |
 
 三者部署的是同一份源码、同一组 `MODEL_*` 变量，功能一致，可直接测试自然语言作图、图片读题、`.ggb` / TikZ / PNG / SVG 导出与「打开 .ggb」。
 
-> **EdgeOne 预览域名怎么用**：`*.edgeone.cool` 是带时效签名的预览链接，直接打开会返回 `401 UNAUTHORIZED`；`edgeone makers deploy` 每次会输出带 `eo_token` 的完整链接（有效期数小时），平台没有关闭该鉴权的开关。要长期公开访问，请在 EdgeOne 控制台「域名管理」绑定自定义域名（加速区域含中国大陆时需完成 ICP 备案）。因此**建议先用上面两个 Cloudflare 链接测试**。
+> `edgeone makers deploy` 输出的 `*.edgeone.cool` 链接带 `eo_token`、有效期数小时，只是**临时预览地址**（直接打开裸预览域名会返回 401），不要写进对外文档；正式入口请在 EdgeOne 控制台「域名管理」绑定自定义域名。
 
 ---
 
@@ -170,7 +170,7 @@ edgeone makers deploy -n geogebra-webchat --skip-ai-gateway-sync
 
 ### 第 3 步：打开即用
 
-浏览器打开部署命令输出的**完整链接**（含 `eo_token`），直接输入数学题或上传题目图片；右上角可临时覆盖模型名与接口地址。裸预览域名会返回 401，长期公开访问请绑定自定义域名，见「在线体验」。
+浏览器打开已绑定的自定义域名（本项目为 https://geogebra-webchat.liangdabiao.com/），直接输入数学题或上传题目图片；右上角可临时覆盖模型名与接口地址。CLI 输出的 `*.edgeone.cool` 只是带 `eo_token` 的临时预览链接，见「在线体验」。
 
 ## 部署到 Cloudflare Pages
 
@@ -227,15 +227,15 @@ Pages 自定义域**不会自动创建 DNS 记录**。无论用 API 绑定还是
 | | EdgeOne 云函数 | Cloudflare Pages Functions |
 |---|---|---|
 | 入口 | `cloud-functions/llm-proxy/index.ts` → `/llm-proxy` | `functions/llm-proxy.ts` → `/llm-proxy`，内部复用同一份通用处理器 |
-| 请求体 | 平台已解析成字符串 / 对象 | 标准 `Request`，body 是 `ReadableStream` |
-| 处理 | 直接读 `req.body` | 适配层先 `await request.text()` 再交给通用处理器；不做这步所有 POST 都会变成空 body |
+| 请求体 | 可能是已解析的字符串 / 对象，也可能是标准 `Request`（`ReadableStream`） | 标准 `Request`，body 是 `ReadableStream` |
+| 处理 | 通用处理器优先 `await req.text()`，失败再回退 `req.body` | 适配层先 `await request.text()` 再交给通用处理器；不做这步所有 POST 都会变成空 body |
 | 环境变量 | `edgeone makers env set KEY VALUE -e production` | `wrangler pages secret bulk` 或控制台 |
 
 白名单、CORS、SSE 惰性流包装、5.5MB 请求体保护全部复用同一份代码；Cloudflare 侧额外用 `content-length` 做 6MB 前置拦截。
 
 ### 访问速度提醒
 
-Cloudflare 免费版没有中国大陆节点，`pages.dev` 与自定义域在国内部分运营商存在 DNS 污染、晚高峰不稳；本项目首次要拉约 50MB GeoGebra 资源，国内加载会明显慢于 EdgeOne。建议把 Cloudflare 站定位为**海外镜像 / 演示 / 备份入口**，国内主站继续用 EdgeOne。`index.html` 里 KaTeX CSS 走 `cdn.jsdelivr.net`，国内同样可能拖慢。
+Cloudflare 免费版没有中国大陆节点，`pages.dev` 与自定义域在国内部分运营商存在 DNS 污染、晚高峰不稳；本项目首次要拉约 50MB GeoGebra 资源，国内加载会明显慢于 EdgeOne。建议把 Cloudflare 站定位为**海外镜像 / 演示 / 备份入口**，国内主站继续用 EdgeOne。KaTeX 的 CSS 与字体已随前端打包，两个站点都不再请求外部 CDN。
 
 ### 验收清单
 
@@ -291,6 +291,10 @@ Pages 绑定自定义域不会自动创建 DNS 记录。需要在 zone 里手动
 
 云函数曾直接把上游 `ReadableStream` 和全部响应头透传，EdgeOne 线上运行时会返回 200 却丢掉 body（本地 `makers dev` 正常，容易漏测）。修复方式：只透传 `content-type` / `cache-control` 等安全头，剔除 `transfer-encoding` / `content-length` / `connection`，并用惰性 `ReadableStream` 包一层上游 body。改动时不要退回 `new Headers(upstream.headers)` + `new Response(upstream.body)`。
 
+### POST /llm-proxy 返回 422 `missing field messages`
+
+EdgeOne 运行时可能把 `context.request` 直接给成标准 `Request`，其 `body` 是 `ReadableStream`；沿用 `JSON.stringify(req.body)` 会得到 `{}`，上游模型收到空对象就报 `missing field messages`（GET 探测仍正常，容易误判为额度或 Key 问题）。通用处理器现在优先 `await req.text()`，失败再回退到平台已解析的字符串 / 普通对象；Cloudflare 侧仍由 `functions/llm-proxy.ts` 预读 body，两条路径都覆盖。
+
 ## 工作原理
 
 ```
@@ -327,6 +331,12 @@ Pages 绑定自定义域不会自动创建 DNS 记录。需要在 zone 里手动
 - 新增 `functions/llm-proxy.ts`：把标准 `Request` 的流式 body 预读成字符串，再复用 EdgeOne 的通用处理器；前端代码零改动
 - 同一份 `dist` 与同一组 `MODEL_*` 变量可分别部署到 EdgeOne 与 Cloudflare Pages，两套站点互不影响
 - 补充 Cloudflare Pages 部署步骤、自定义域 CNAME 要求、平台差异与国内访问速度提醒
+
+### 2026-11 · 公式样式本地化与在线入口
+
+- 删除 `index.html` 里的 `cdn.jsdelivr.net` KaTeX `<link>`，改由 `src/main.tsx` 导入 `katex/dist/katex.min.css`；Vite 打包 CSS 与字体，首屏不再请求外部 CDN，样式也与本地 `katex` JS 版本一致
+- README 列出三个在线体验地址；EdgeOne 使用已绑定的自定义域 `geogebra-webchat.liangdabiao.com`，`*.edgeone.cool` 仅为临时预览链接
+- 云函数请求体读取兼容「标准 `Request` 流式 body」的新版 EdgeOne 运行时，修复线上 POST 返回 422 `missing field messages`
 
 ## 更多文档
 

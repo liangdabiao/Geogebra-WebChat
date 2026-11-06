@@ -177,12 +177,27 @@ export async function onRequest(context: any) {
   const adba = pickHeader(headers, "anthropic-dangerous-direct-browser-access");
   if (adba) fwd["anthropic-dangerous-direct-browser-access"] = adba;
 
-  // body 可能被运行时解析为对象，也可能是原始字符串
-  let body: string;
-  const raw = (req as any).body;
-  if (typeof raw === "string") body = raw;
-  else if (raw && typeof raw === "object") body = JSON.stringify(raw);
-  else body = "";
+  // body 在不同运行时有三种形态，必须都兼容：
+  //   ① 平台已解析成字符串 / 普通对象（旧版 EdgeOne、Cloudflare 适配层传进来的对象）；
+  //   ② 标准 Request，body 是只读一次的 ReadableStream（新版 EdgeOne 运行时）。
+  // 若把 ReadableStream 直接 JSON.stringify，会得到 "{}"，上游模型随即报
+  // `missing field messages`（GET 探测仍正常，极易漏测）。
+  let body = "";
+  try {
+    if (typeof (req as any).text === "function") {
+      const text = await (req as any).text();
+      if (typeof text === "string" && text.length > 0) body = text;
+    }
+  } catch {
+    // 平台已预解析时 text() 不存在或流已被消费，回退到 req.body。
+  }
+  if (!body) {
+    const raw = (req as any).body;
+    if (typeof raw === "string") body = raw;
+    else if (raw && typeof raw === "object" && typeof (raw as any).getReader !== "function") {
+      body = JSON.stringify(raw);
+    }
+  }
 
   // EdgeOne Cloud Functions 请求体上限 6MB；图片以 base64 嵌在 JSON 里会膨胀约 1/3。
   // 超限时提前返回可读错误，避免被平台直接截断成难以定位的错误。

@@ -1,6 +1,8 @@
 /* @refresh reload */
 import { render } from "solid-js/web";
 import App from "./App";
+// KaTeX 样式与字体随 Vite 一起打包，避免依赖 cdn.jsdelivr.net（国内首屏更稳，且与本地 katex JS 同版本）
+import "katex/dist/katex.min.css";
 import "./styles.css";
 
 const root = document.getElementById("root");
